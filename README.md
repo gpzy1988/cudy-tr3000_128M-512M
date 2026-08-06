@@ -98,7 +98,8 @@ rm sing-box.tar.gz
 
 ---
 
-上传 uboot 固件文件
+## 上传 uboot 固件文件
+
 分别执行以下命令上传 U-Boot 分区文件（请根据你的文件名替换命令中的文件名）：
 scp mt7981_cudy_tr3000-v1-bl2_****.bin root@192.168.6.1:/tmp
 scp mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin root@192.168.6.1:/tmp
@@ -107,7 +108,7 @@ ssh root@192.168.6.1
 insmod mtd-rw i_want_a_brick=1 
 执行写入命令刷入 BL2 和 FIP：
 mtd write /tmp/mt7981_cudy_tr3000-v1-bl2_****.bin BL2
-mtd write /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****bin FIP
+mtd write /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin FIP
 校验分区是否成功写入，如无意外会提示 success
 mtd verify /tmp/mt7981_cudy_tr3000-v1-bl2_****.bin BL2
 mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin FIP
@@ -115,7 +116,7 @@ mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin FIP
 512MBuboot版本作者有但是暂时不开源
 
 ## Credits
-
+- [immortalwrt-mt7981-cudy-tr3000](https://github.com/weekdaycare/immortalwrt-mt7981-cudy-tr3000)
 - [bl-mt798x-dhcpd](https://github.com/weekdaycare/bl-mt798x-dhcpd)
 - [bl-mt798x](https://github.com/hanwckf/bl-mt798x)
 - [immortalwrtwrt](https://github.com/padavanonly/immortalwrt-mt798x-6.6)

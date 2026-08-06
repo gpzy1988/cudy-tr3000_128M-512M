@@ -58,13 +58,15 @@ echo 1 > /sys/class/gpio/modem_power/value
 
 ## SSH 连接 Action
 
-可以通过 ssh 连接到 Action 工作流来配置 `menuconfig` 。
+可以通过 ssh 连接到 Action 工作流来配置 `menuconfig` 。示例：
+
 ssh **********@******.***.io\
 然后按 Q ，继续输入指令
 cd openwrt
 make menuconfig
 cd ..
 touch continue
+
 ---
 
 ## 编译注意事项

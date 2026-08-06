@@ -1,7 +1,7 @@
 
 ## immortalwrt 源码
 
-编译自 https://github.com/padavanonly/immortalwrt-mt798x-6.6 
+编译自 https://github.com/immortalwrt/immortalwrt
 
 ---
 
@@ -125,6 +125,7 @@ mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 
 ## Credits
 - [immortalwrt-mt7981-cudy-tr3000](https://github.com/weekdaycare/immortalwrt-mt7981-cudy-tr3000)
+- [immortalwrt](https://github.com/immortalwrt/immortalwrt)
 - [bl-mt798x-dhcpd](https://github.com/weekdaycare/bl-mt798x-dhcpd)
 - [bl-mt798x](https://github.com/hanwckf/bl-mt798x)
 - [immortalwrtwrt](https://github.com/padavanonly/immortalwrt-mt798x-6.6)

@@ -59,19 +59,14 @@ echo 1 > /sys/class/gpio/modem_power/value
 ## SSH 连接 Action
 
 可以通过 ssh 连接到 Action 工作流来配置 `menuconfig` 。示例：
-
+```bash
 ssh XXXXXXXXXX@XXXXXX.XXX.io
-
-然后按 Q ，继续输入指令
-
+##然后按 Q ，继续输入指令
 cd openwrt
-
 make menuconfig
-
 cd ..
-
 touch continue
-
+```
 完成定制
 
 ---
@@ -107,6 +102,7 @@ rm sing-box.tar.gz
 
 ## 上传 uboot 固件文件
 
+```bash
 ## 分别执行以下命令上传 U-Boot 分区文件（请根据你的文件名替换命令中的文件名）：
 
 scp mt7981_cudy_tr3000-v1-bl2_XXXX.bin root@192.168.6.1:/tmp
@@ -130,7 +126,7 @@ mtd write /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 mtd verify /tmp/mt7981_cudy_tr3000-v1-bl2_XXXX.bin BL2
 
 mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
-
+```
 ## 512MBuboot版本作者有但是暂时不开源
 
 ## Credits

@@ -60,7 +60,7 @@ echo 1 > /sys/class/gpio/modem_power/value
 
 可以通过 ssh 连接到 Action 工作流来配置 `menuconfig` 。示例：
 
-ssh **********@******.***.io\
+ssh XXXXXXXXXX@XXXXXX.XXX.io\
 然后按 Q ，继续输入指令
 cd openwrt
 make menuconfig
@@ -102,9 +102,9 @@ rm sing-box.tar.gz
 
 ## 分别执行以下命令上传 U-Boot 分区文件（请根据你的文件名替换命令中的文件名）：
 
-scp mt7981_cudy_tr3000-v1-bl2_****.bin root@192.168.6.1:/tmp
+scp mt7981_cudy_tr3000-v1-bl2_XXXX.bin root@192.168.6.1:/tmp
 
-scp mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin root@192.168.6.1:/tmp
+scp mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin root@192.168.6.1:/tmp
 
 ssh root@192.168.6.1
 
@@ -114,15 +114,15 @@ insmod mtd-rw i_want_a_brick=1
 
 ## 执行写入命令刷入 BL2 和 FIP：
 
-mtd write /tmp/mt7981_cudy_tr3000-v1-bl2_****.bin BL2
+mtd write /tmp/mt7981_cudy_tr3000-v1-bl2_XXXX.bin BL2
 
-mtd write /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin FIP
+mtd write /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 
 ## 校验分区是否成功写入，如无意外会提示 success
 
-mtd verify /tmp/mt7981_cudy_tr3000-v1-bl2_****.bin BL2
+mtd verify /tmp/mt7981_cudy_tr3000-v1-bl2_XXXX.bin BL2
 
-mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin FIP
+mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 
 ## 512MBuboot版本作者有但是暂时不开源
 
@@ -146,4 +146,4 @@ mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_****.bin FIP
 
 ## License
 
-[MIT](https://github.com/P3TERX/Actions-OpenWrt/blob/main/LICENSE) © [**P3TERX**](https://p3terx.com)
+[MIT](https://github.com/P3TERX/Actions-OpenWrt/blob/main/LICENSE) © [XXP3TERXXX](https://p3terx.com)

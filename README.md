@@ -104,27 +104,21 @@ rm sing-box.tar.gz
 
 ```bash
 ## 分别执行以下命令上传 U-Boot 分区文件（请根据你的文件名替换命令中的文件名）：
-
 scp mt7981_cudy_tr3000-v1-bl2_XXXX.bin root@192.168.6.1:/tmp
-
 scp mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin root@192.168.6.1:/tmp
 
+## SSH登录路由器
 ssh root@192.168.6.1
 
 ## 执行命令解锁 MTD 分区，否则无法写入分区（提示Could not open mtd device）
-
-insmod mtd-rw i_want_a_brick=1 
+insmod mtd-rw i_want_a_brick=1
 
 ## 执行写入命令刷入 BL2 和 FIP：
-
 mtd write /tmp/mt7981_cudy_tr3000-v1-bl2_XXXX.bin BL2
-
 mtd write /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 
 ## 校验分区是否成功写入，如无意外会提示 success
-
 mtd verify /tmp/mt7981_cudy_tr3000-v1-bl2_XXXX.bin BL2
-
 mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 ```
 ## 512MBuboot版本作者有但是暂时不开源

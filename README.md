@@ -146,4 +146,4 @@ mtd verify /tmp/mt7981_cudy_tr3000-v1-fip-fixed-parts-multi-layout_XXXX.bin FIP
 
 ## License
 
-[MIT](https://github.com/P3TERX/Actions-OpenWrt/blob/main/LICENSE) © [XXP3TERXXX](https://p3terx.com)
+[MIT](https://github.com/P3TERX/Actions-OpenWrt/blob/main/LICENSE) © [**P3TERX**](https://p3terx.com)

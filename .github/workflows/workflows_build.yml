@@ -15,7 +15,7 @@ on:
           - '256M'
           - '128M'
           - '128M-Ubootmod'
-          - '全部设备' 
+          - 'all' 
       repo:
         description: '指定ImmortalWrt源码仓库地址'
         required: true
@@ -32,7 +32,7 @@ on:
         type: string
         default: ''
       ssh:
-        description: '开启远程SSH配置模式（选择「全部设备」时该选项不生效）'
+        description: '开启远程SSH配置模式（选择「all」时该选项不生效）'
         required: false
         type: boolean
         default: false
@@ -73,7 +73,7 @@ env:
 jobs:
   menuconfig:
     name: ⚙️ 交互式菜单配置
-    if: github.event.inputs.ssh == 'true' && github.event.inputs.device != '全部设备'
+    if: github.event.inputs.ssh == 'true' && github.event.inputs.device != 'all'
     runs-on: ubuntu-22.04
     steps:
       - name: 拉取当前项目代码
@@ -173,7 +173,7 @@ jobs:
         id: config-hash
         run: |
           FIRST_DEV_CONFIG="config/512m.config"
-          if [ "${DEVICE_INPUT}" != "全部设备" ]; then
+          if [ "${DEVICE_INPUT}" != "all" ]; then
             case "$DEVICE_INPUT" in
               "512M") FIRST_DEV_CONFIG="config/512m.config" ;;
               "256M") FIRST_DEV_CONFIG="config/256m.config" ;;
@@ -213,7 +213,7 @@ jobs:
       - name: 全量固件循环编译
         id: compile
         run: |
-          if [ "${DEVICE_INPUT}" = "全部设备" ]; then
+          if [ "${DEVICE_INPUT}" = "all" ]; then
             DEVICES="512M 256M 128M 128M-Ubootmod"
           else
             DEVICES="${DEVICE_INPUT}"

@@ -1,5 +1,4 @@
-
-name: n ImmortalWrt TTYd 网页终端编译生成器
+name: ImmortalWrt TTYd 网页终端编译生成器
 
 on:
   repository_dispatch:
@@ -19,7 +18,7 @@ on:
           - 'DIY Custom'
           - 'all' 
       repo:
-        description: '指定OpenWrt源码仓库地址'
+        description: '指定 OpenWrt 源码仓库地址'
         required: true
         type: string
         default: 'https://github.com/padavanonly/immortalwrt-mt798x-6.6'
@@ -34,17 +33,17 @@ on:
         type: string
         default: ''
       web_terminal:
-        description: '开启TTYd网页终端（仅非all设备生效）'
+        description: '开启 TTYd 网页终端（仅非 all 设备生效）'
         required: false
         type: boolean
         default: false
       terminal_password:
-        description: '自定义网页终端访问密码，默认密码openwrt123'
+        description: '自定义网页终端访问密码，默认密码 openwrt123'
         required: false
         type: string
         default: 'openwrt123'
       release:
-        description: '编译完成后自动发布到GitHub Release'
+        description: '编译完成后自动发布到 GitHub Release'
         required: false
         type: boolean
         default: true
@@ -81,17 +80,20 @@ jobs:
     steps:
       - name: 拉取配置仓库代码
         uses: actions/checkout@v4
+
       - name: 初始化基础依赖环境
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libncurses-dev build-essential git wget python3 bzip2 lsof
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
-      - name: 克隆OpenWrt源码
+
+      - name: 克隆 OpenWrt 源码
         working-directory: /workdir
         run: |
           git clone $REPO_URL -b $REPO_BRANCH --single-branch --filter=blob:none openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
       - name: 绑定对应设备的配置文件
         run: |
           case "$DEVICE_INPUT" in
@@ -101,7 +103,8 @@ jobs:
             "128M-Ubootmod") echo "CONFIG_FILE=config/128muboot.config" >> $GITHUB_ENV ;;
             "DIY Custom") echo "CONFIG_FILE=config/diy-custom.config" >> $GITHUB_ENV ;;
           esac
-      - name: 加载Feeds与初始配置
+
+      - name: 加载 Feeds 与初始配置
         run: |
           [ -e $FEEDS_CONF ] && cp $FEEDS_CONF openwrt/feeds.conf.default
           chmod +x $GITHUB_WORKSPACE/$DIY_P1_SH $GITHUB_WORKSPACE/$DIY_P2_SH
@@ -111,28 +114,30 @@ jobs:
           [ -e $GITHUB_WORKSPACE/${CONFIG_FILE} ] && cp -f $GITHUB_WORKSPACE/${CONFIG_FILE} .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
           make defconfig
-      - name: 启动TTYd服务 + Cloudflare内网穿透隧道
+
+      - name: 启动 TTYd 服务 + Cloudflare 内网穿透隧道
         run: |
-          # 1. 下载TTYd二进制程序
+          # 1. 下载 TTYd 二进制程序
           wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           chmod +x ttyd.x86_64
           
-          # 2. 下载指定稳定版Cloudflared (2024.2.1)
-          wget -q https://github.com/cloudflare/cloudflared/releases/download/2024.2.1/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
+          # 2. 下载 Cloudflared 二进制程序 (直接使用二进制文件避免 dpkg 权限问题)
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared-linux-amd64
           
-          # 3. 端口清理：杀死可能占用7681端口的残留进程
+          # 3. 端口清理：杀死可能占用 7681 端口的残留进程
           sudo lsof -i :7681 | awk 'NR>1 {print $2}' | xargs sudo kill -9 2>/dev/null || true
           
-          # 4. 启动TTYd：修复参数格式，使用 -- 分隔选项与命令
+          # 4. 启动 TTYd：修复参数格式，使用 -- 分隔选项与命令
           nohup ./ttyd.x86_64 -p 7681 -c ":$TERMINAL_PASS" -t enableTracing=false -- bash -i &
           
-          echo "⏳ 正在生成公网隧道链接，等待10秒..."
-          
-          # 5. 启动Cloudflare隧道：移除废弃的 --websocket 标志
-          nohup setsid cloudflared tunnel --url http://localhost:7681 --tcp-keepalive 30s --no-autoupdate > tunnel.log 2>&1 < /dev/null &
-          
+          echo "⏳ 正在生成公网隧道链接，等待 10 秒..."
           sleep 10
+          
+          # 5. 启动 Cloudflare 隧道：移除已废弃的 --websocket 标志
+          nohup ./cloudflared-linux-amd64 tunnel --url http://localhost:7681 --no-autoupdate > tunnel.log 2>&1 &
+          
+          sleep 15
           
           # 6. 提取隧道链接
           TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' tunnel.log | head -n 1)
@@ -148,8 +153,8 @@ jobs:
           echo "✅ 网页终端已成功启动！"
           echo "🔗 访问地址：$TUNNEL_URL"
           echo "🔑 终端密码：$TERMINAL_PASS"
-          echo "⚠️  请保持当前Workflow页面打开，你有30分钟操作时间"
-          echo "💡 操作完成后手动取消当前Workflow运行，配置会自动保存回仓库"
+          echo "⚠️  请保持当前 Workflow 页面打开，你有 30 分钟操作时间"
+          echo "💡 操作完成后手动取消当前 Workflow 运行，配置会自动保存回仓库"
           echo "========================================"
           
           # 8. 阻塞进程保持会话运行
@@ -185,6 +190,7 @@ jobs:
     steps:
       - name: 拉取配置仓库代码
         uses: actions/checkout@v4
+
       - name: 初始化完整编译环境
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -197,14 +203,16 @@ jobs:
           sudo timedatectl set-timezone "$TZ"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
-      - name: 克隆OpenWrt源码并切换指定Commit
+
+      - name: 克隆 OpenWrt 源码并切换指定 Commit
         working-directory: /workdir
         run: |
           git clone $REPO_URL -b $REPO_BRANCH --single-branch --filter=blob:none openwrt
           cd openwrt
           if [ -n "${REPO_COMMIT}" ]; then git checkout $REPO_COMMIT; fi
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-      - name: 加载自定义Feeds脚本
+
+      - name: 加载自定义 Feeds 脚本
         run: |
           [ -e $FEEDS_CONF ] && cp $FEEDS_CONF openwrt/feeds.conf.default
           chmod +x $GITHUB_WORKSPACE/$DIY_P1_SH $GITHUB_WORKSPACE/$DIY_P2_SH
@@ -212,6 +220,7 @@ jobs:
           $GITHUB_WORKSPACE/$DIY_P1_SH
           ./scripts/feeds update -a && ./scripts/feeds install -a
           $GITHUB_WORKSPACE/$DIY_P2_SH
+
       - name: 生成配置哈希指纹用于缓存
         id: config-hash
         run: |
@@ -230,18 +239,21 @@ jobs:
           cd openwrt && make defconfig
           CONFIG_HASH=$(md5sum .config | awk '{print $1}')
           echo "hash=$CONFIG_HASH" >> $GITHUB_OUTPUT
-      - name: 缓存编译中间产物
+
+      - name: 缓存编译中间产物 (ccache)
         uses: actions/cache@v4
         with:
           path: /workdir/.ccache
           key: ${{ runner.os }}-ccache-${{ env.REPO_BRANCH }}-${{ steps.config-hash.outputs.hash }}
           restore-keys: ${{ runner.os }}-ccache-${{ env.REPO_BRANCH }}-
-      - name: 缓存下载依赖包
+
+      - name: 缓存下载依赖包 (dl)
         uses: actions/cache@v4
         with:
           path: /workdir/openwrt/dl
           key: ${{ runner.os }}-dl-${{ env.REPO_BRANCH }}-${{ steps.config-hash.outputs.hash }}
           restore-keys: ${{ runner.os }}-dl-${{ env.REPO_BRANCH }}-
+
       - name: 配置加速编译缓存
         run: |
           ccache --set-config=max_size=$CCACHE_MAXSIZE
@@ -249,6 +261,7 @@ jobs:
           ccache --set-config=compression=true
           ccache --set-config=compression_level=6
           ccache -z
+
       - name: 多设备批量编译
         id: compile
         run: |
@@ -281,8 +294,9 @@ jobs:
             echo "::endgroup::"
           done
           ccache -s
-          find bin/targets -type f \( -name "*sysupgrade.bin" -o -name "*factory.bin" -o -name "*.img" -o -name "*.tar.gz" \) -exec cp {} $GITHUB_WORKSPACE/firmware_collection/ \; 2>/dev/null || true
+          find bin/targets -type f $ -name "*sysupgrade.bin" -o -name "*factory.bin" -o -name "*.img" -o -name "*.tar.gz" $ -exec cp {} $GITHUB_WORKSPACE/firmware_collection/ \; 2>/dev/null || true
           echo "status=success" >> $GITHUB_OUTPUT
+
       - name: 上传固件制品
         uses: actions/upload-artifact@v4
         if: steps.compile.outputs.status == 'success'
@@ -290,6 +304,7 @@ jobs:
           name: ImmortalWrt_${{ env.DEVICE_INPUT }}
           path: ${{ github.workspace }}/firmware_collection/*
           compression-level: 9
+
       - name: 生成发布标签信息
         id: tag
         if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'
@@ -298,12 +313,13 @@ jobs:
           echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
           cat > release.txt << EOF
           ## 📦 ImmortalWrt 固件发布
-          **发布标签:** $BUILD_TIME
-          **源码分支:** $REPO_BRANCH
-          **编译设备:** ${DEVICE_INPUT}
+          &zwnj;**发布标签:**&zwnj; $BUILD_TIME
+          &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
+          &zwnj;**编译设备:**&zwnj; ${DEVICE_INPUT}
           EOF
           echo "status=success" >> $GITHUB_OUTPUT
-      - name: 发布固件到Release
+
+      - name: 发布固件到 Release
         uses: softprops/action-gh-release@v2
         if: steps.tag.outputs.status == 'success'
         env:
@@ -315,12 +331,14 @@ jobs:
           files: |
             /workdir/openwrt/bin/targets/*/*/*sysupgrade.bin
             /workdir/openwrt/bin/targets/*/*/*factory.bin
+
       - name: 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
           retain_days: 0
           keep_minimum_runs: 5
-      - name: 清理旧的Release版本
+
+      - name: 清理旧的 Release 版本
         uses: dev-drprasad/delete-older-releases@v0.3.4
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:

@@ -1,4 +1,4 @@
-name: 1 ImmortalWrt TTYd 网页终端编译生成器
+name: ImmortalWrt TTYd & SSH 双模编译生成器
 
 on:
   repository_dispatch:
@@ -34,6 +34,11 @@ on:
         default: ''
       web_terminal:
         description: '启用 TTYd 网页终端 (若设备选 all 则跳过)'
+        required: false
+        type: boolean
+        default: false
+      enable_ssh:
+        description: '启用标准 SSH 登录 (需配合私钥使用)'
         required: false
         type: boolean
         default: false
@@ -74,7 +79,7 @@ env:
 
 jobs:
   web-terminal-config:
-    name: ⚙️ TTYd 交互式配置
+    name: ⚙️ TTYd & SSH 交互式配置
     if: github.event.inputs.web_terminal == 'true' && github.event.inputs.device != 'all'
     runs-on: ubuntu-22.04
     steps:
@@ -84,7 +89,7 @@ jobs:
       - name: 初始化基础构建环境
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y libncurses-dev build-essential git wget python3 bzip2 lsof
+          sudo apt-get install -y libncurses-dev build-essential git wget python3 bzip2 lsof openssh-server
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
 
@@ -115,55 +120,114 @@ jobs:
           $GITHUB_WORKSPACE/$DIY_P2_SH
           make defconfig
 
-      - name: 启动 TTYd 与 Cloudflare 隧道
+      - name: 启动 TTYd & SSH 服务与隧道
         run: |
+          # ================= 准备工作 =================
           # 1. 下载 TTYd 二进制文件
           wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           chmod +x ttyd.x86_64
           
-          # 2. 下载 Cloudflared 二进制文件 (避免 dpkg 依赖问题)
+          # 2. 下载 Cloudflared 二进制文件
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
           
-          # 3. 清理 7681 端口残留进程
+          # 3. 清理端口残留
           sudo lsof -i :7681 | awk 'NR>1 {print $2}' | xargs sudo kill -9 2>/dev/null || true
+          sudo lsof -i :2222 | awk 'NR>1 {print $2}' | xargs sudo kill -9 2>/dev/null || true
           
-          # 4. 设置终端环境变量 (解决无法输入/显示异常问题)
+          # 4. 设置终端环境变量
           export TERM=xterm-256color
           
-          # 5. 启动 TTYd
-          # 关键修正: 使用 '--' 分隔选项与命令, 使用 'bash -i' 确保交互式 Shell
+          # ================= 启动 TTYd (网页终端) =================
+          echo "🚀 正在启动 TTYd 网页终端..."
           nohup ./ttyd.x86_64 -p 7681 -c ":$TERMINAL_PASS" -t enableTracing=false -t forceResize=true -- bash -i > ttyd.log 2>&1 &
+          sleep 2
           
-          echo "⏳ 正在生成公网隧道链接，等待 10 秒..."
+          # ================= 启动 SSH 服务 (标准 SSH 登录) =================
+          ENABLE_SSH="${{ github.event.inputs.enable_ssh }}"
+          SSH_PORT=2222
+          SSH_USER=runner
+          SSH_KEY_FILE=/tmp/ssh_host_key
+          
+          if [ "$ENABLE_SSH" == "true" ]; then
+            echo "🚀 正在配置 SSH 服务..."
+            
+            # 1. 生成临时 SSH 密钥对
+            ssh-keygen -t rsa -b 4096 -f $SSH_KEY_FILE -N "" -q
+            
+            # 2. 配置 SSHD
+            sudo mkdir -p /etc/ssh
+            sudo cp $SSH_KEY_FILE /etc/ssh/ssh_host_rsa_key
+            sudo chmod 600 /etc/ssh/ssh_host_rsa_key
+            
+            # 允许密码登录为空 (仅用于测试，实际使用密钥)
+            echo "Port $SSH_PORT" | sudo tee /etc/ssh/sshd_config.d/custom.conf
+            echo "PermitRootLogin no" | sudo tee -a /etc/ssh/sshd_config.d/custom.conf
+            echo "PasswordAuthentication no" | sudo tee -a /etc/ssh/sshd_config.d/custom.conf
+            echo "PubkeyAuthentication yes" | sudo tee -a /etc/ssh/sshd_config.d/custom.conf
+            echo "AuthorizedKeysFile $SSH_KEY_FILE.pub" | sudo tee -a /etc/ssh/sshd_config.d/custom.conf
+            
+            # 3. 启动 SSHD
+            sudo /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config.d/custom.conf &
+            sleep 2
+            
+            # 4. 将私钥内容输出到日志 (仅供当前用户复制使用)
+            echo "========================================"
+            echo "🔑 SSH 私钥内容 (请复制保存为 id_rsa):"
+            echo "----------------------------------------"
+            cat $SSH_KEY_FILE
+            echo "----------------------------------------"
+            echo "⚠️  私钥仅在此次运行中有效，请勿泄露！"
+            echo "========================================"
+            
+            # 5. 启动 Cloudflare 隧道穿透 SSH 端口
+            echo "🚀 正在建立 SSH 公网隧道..."
+            nohup ./cloudflared-linux-amd64 tunnel --url tcp://localhost:$SSH_PORT --no-autoupdate > ssh_tunnel.log 2>&1 &
+            sleep 10
+            
+            # 提取 SSH 隧道地址 (Cloudflare TCP 隧道通常返回类似 tcp://xxx.trycloudflare.com:xxxx 的地址)
+            SSH_TUNNEL_INFO=$(grep -oE 'tcp://[a-zA-Z0-9\-]+\.trycloudflare\.com:[0-9]+' ssh_tunnel.log | head -n 1)
+            
+            if [ -n "$SSH_TUNNEL_INFO" ]; then
+              SSH_HOST=$(echo $SSH_TUNNEL_INFO | cut -d'/' -f3 | cut -d':' -f1)
+              SSH_PORT_EXT=$(echo $SSH_TUNNEL_INFO | cut -d':' -f2)
+              echo "✅ SSH 公网地址: $SSH_HOST"
+              echo "✅ SSH 公网端口: $SSH_PORT_EXT"
+              echo "✅ SSH 用户名: $SSH_USER"
+              echo "💡 连接命令: ssh -i id_rsa -p $SSH_PORT_EXT $SSH_USER@$SSH_HOST"
+            else
+              echo "❌ SSH 隧道启动失败，请查看 ssh_tunnel.log"
+              cat ssh_tunnel.log
+            fi
+          fi
+          
+          # ================= 启动 TTYd 隧道 =================
+          echo "⏳ 正在生成 TTYd 公网隧道链接..."
+          nohup ./cloudflared-linux-amd64 tunnel --url http://localhost:7681 --no-autoupdate > ttyd_tunnel.log 2>&1 &
           sleep 10
           
-          # 6. 启动 Cloudflare 隧道 (移除已废弃的 --websocket 参数)
-          nohup ./cloudflared-linux-amd64 tunnel --url http://localhost:7681 --no-autoupdate > tunnel.log 2>&1 &
+          TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' ttyd_tunnel.log | head -n 1)
           
-          sleep 15
-          
-          # 7. 提取隧道 URL
-          TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' tunnel.log | head -n 1)
-          
-          # 8. 错误处理
           if [ -z "$TUNNEL_URL" ]; then
-            echo "❌ 隧道启动失败。TTYd 日志:"
+            echo "❌ TTYd 隧道启动失败。TTYd 日志:"
             cat ttyd.log
             echo "❌ Tunnel 日志:"
-            cat tunnel.log
+            cat ttyd_tunnel.log
             exit 1
           fi
           
           echo "========================================"
-          echo "✅ 网页终端已成功启动！"
-          echo "🔗 访问地址：$TUNNEL_URL"
-          echo "🔑 终端密码：$TERMINAL_PASS"
+          echo "✅ 服务已成功启动！"
+          echo "🌐 TTYd 地址：$TUNNEL_URL"
+          echo "🔑 TTYd 密码：$TERMINAL_PASS"
+          if [ "$ENABLE_SSH" == "true" ]; then
+            echo "🔗 SSH 信息已在上方输出，请复制私钥连接"
+          fi
           echo "⚠️  请保持当前 Workflow 页面打开，你有 30 分钟操作时间"
           echo "💡 配置完成后，请手动取消此 Workflow 以保存更改"
           echo "========================================"
           
-          # 9. 保持任务运行
+          # 保持任务运行
           tail -f /dev/null
         timeout-minutes: 30
 

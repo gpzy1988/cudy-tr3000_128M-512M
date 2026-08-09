@@ -1,3 +1,4 @@
+
 name: n ImmortalWrt TTYd 网页终端编译生成器
 
 on:
@@ -116,27 +117,27 @@ jobs:
           wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           chmod +x ttyd.x86_64
           
-          # 2. 下载指定稳定版Cloudflared (2024.2.1)，避免最新版兼容性报错
+          # 2. 下载指定稳定版Cloudflared (2024.2.1)
           wget -q https://github.com/cloudflare/cloudflared/releases/download/2024.2.1/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
           
           # 3. 端口清理：杀死可能占用7681端口的残留进程
           sudo lsof -i :7681 | awk 'NR>1 {print $2}' | xargs sudo kill -9 2>/dev/null || true
           
-          # 4. 启动TTYd：强制分配伪终端(-t) + 交互式Shell(bash -i)，修复输入无响应
-          nohup ./ttyd.x86_64 -p 7681 -c ":$TERMINAL_PASS" -t bash -i &
+          # 4. 启动TTYd：修复参数格式，使用 -- 分隔选项与命令
+          nohup ./ttyd.x86_64 -p 7681 -c ":$TERMINAL_PASS" -t enableTracing=false -- bash -i &
           
           echo "⏳ 正在生成公网隧道链接，等待10秒..."
           
-          # 5. 启动Cloudflare隧道：双后台托管 + 禁用自动更新 + WebSocket长连接
-          nohup setsid cloudflared tunnel --url http://localhost:7681 --websocket --tcp-keepalive 30s --no-autoupdate > tunnel.log 2>&1 < /dev/null &
+          # 5. 启动Cloudflare隧道：移除废弃的 --websocket 标志
+          nohup setsid cloudflared tunnel --url http://localhost:7681 --tcp-keepalive 30s --no-autoupdate > tunnel.log 2>&1 < /dev/null &
           
           sleep 10
           
-          # 6. 提取隧道链接：使用兼容性更强的正则表达式
+          # 6. 提取隧道链接
           TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' tunnel.log | head -n 1)
           
-          # 7. 异常处理：若链接为空，输出完整日志以便排查
+          # 7. 异常处理
           if [ -z "$TUNNEL_URL" ]; then
             echo "❌ 隧道启动失败，完整日志如下："
             cat tunnel.log
@@ -158,19 +159,14 @@ jobs:
       - name: 保存自定义配置回仓库
         if: success() || failure() || cancelled()
         run: |
-          # 容错判断：若.config不存在则生成默认配置
           [ ! -f /workdir/openwrt/.config ] && make -C /workdir/openwrt defconfig
-          # 复制配置回仓库
           cp -f /workdir/openwrt/.config $GITHUB_WORKSPACE/${CONFIG_FILE} || true
           
           cd $GITHUB_WORKSPACE
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 自动暂存本地修改，避免pull冲突
           git stash push -m "auto-stash before pull"
-          
-          # 动态获取当前分支并拉取最新代码
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           git pull origin $CURRENT_BRANCH --rebase
           git stash pop || true
@@ -285,8 +281,7 @@ jobs:
             echo "::endgroup::"
           done
           ccache -s
-          # 全量扫描所有固件文件，避免遗漏
-          find bin/targets -type f $ -name "*sysupgrade.bin" -o -name "*factory.bin" -o -name "*.img" -o -name "*.tar.gz" $ -exec cp {} $GITHUB_WORKSPACE/firmware_collection/ \; 2>/dev/null || true
+          find bin/targets -type f \( -name "*sysupgrade.bin" -o -name "*factory.bin" -o -name "*.img" -o -name "*.tar.gz" \) -exec cp {} $GITHUB_WORKSPACE/firmware_collection/ \; 2>/dev/null || true
           echo "status=success" >> $GITHUB_OUTPUT
       - name: 上传固件制品
         uses: actions/upload-artifact@v4
@@ -303,9 +298,9 @@ jobs:
           echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
           cat > release.txt << EOF
           ## 📦 ImmortalWrt 固件发布
-          &zwnj;**发布标签:**&zwnj; $BUILD_TIME
-          &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
-          &zwnj;**编译设备:**&zwnj; ${DEVICE_INPUT}
+          **发布标签:** $BUILD_TIME
+          **源码分支:** $REPO_BRANCH
+          **编译设备:** ${DEVICE_INPUT}
           EOF
           echo "status=success" >> $GITHUB_OUTPUT
       - name: 发布固件到Release

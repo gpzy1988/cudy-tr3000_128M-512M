@@ -1,4 +1,4 @@
-name: ImmortalWrt TTYd 网页终端编译生成器1
+name: ImmortalWrt TTYd 网页终端编译生成器
 
 on:
   repository_dispatch:
@@ -110,13 +110,11 @@ jobs:
           [ -e $GITHUB_WORKSPACE/${CONFIG_FILE} ] && cp -f $GITHUB_WORKSPACE/${CONFIG_FILE} .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
           make defconfig
-      - name: 启动TTYd服务 + Cloudflare内网穿透隧道（修复输入无响应问题）
+      - name: 启动TTYd服务 + Cloudflare内网穿透隧道
         run: |
           # 下载TTYd二进制程序
           wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           chmod +x ttyd.x86_64
-          # 扩容系统伪终端数量，解决Ubuntu运行器默认PTY资源不足问题
-          sudo sysctl kernel.pty-max=4096
           # 下载安装Cloudflared内网穿透工具
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb

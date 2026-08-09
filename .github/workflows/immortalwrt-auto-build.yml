@@ -1,4 +1,4 @@
-name: ImmortalWrt 固件自动编译构建器
+name: n ImmortalWrt 固件自动编译构建器
 
 on:
   repository_dispatch:

@@ -1,4 +1,4 @@
-name: ImmortalWrt TTYd 网页终端编译生成器
+name: n ImmortalWrt TTYd 网页终端编译生成器
 
 on:
   repository_dispatch:

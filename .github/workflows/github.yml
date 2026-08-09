@@ -1,5 +1,5 @@
 
-name: 2 ImmortalWrt 固件自动编译构建器
+name: ImmortalWrt 固件自动编译构建器
 
 on:
   repository_dispatch:
@@ -65,11 +65,6 @@ env:
   UPLOAD_RELEASE: ${{ github.event.inputs.release || github.event.client_payload.release }}
   PRERELEASE: ${{ github.event.inputs.prerelease }}
   TZ: Asia/Shanghai
-  # 若使用私有Tmate服务器，请在 Secrets 中配置以下变量；若留空则尝试使用公共服务器（不稳定）
-  TMATE_SERVER_HOST: ${{ secrets.TMATE_SERVER_HOST }}
-  TMATE_SERVER_PORT: ${{ secrets.TMATE_SERVER_PORT }}
-  TMATE_RSA_FINGERPRINT: ${{ secrets.TMATE_RSA_FINGERPRINT }}
-  TMATE_ED25519_FINGERPRINT: ${{ secrets.TMATE_ED25519_FINGERPRINT }}
 
 jobs:
   tmate-selfhost-server:
@@ -149,23 +144,26 @@ jobs:
           mkdir -p tmate-server && cd tmate-server
           # 下载并执行密钥生成脚本
           curl -s -q https://raw.githubusercontent.com/tmate-io/tmate-ssh-server/master/create_keys.sh | bash
-          # 确保密钥权限正确
+          # 强制修正密钥权限，避免SSH服务拒绝加载
+          chmod 700 keys
           chmod 600 keys/*
 
       - name: 启动tmate服务端容器
         run: |
+          # 清理旧容器
+          docker rm -f tmate-private-server || true
+          # 释放2222端口
+          sudo fuser -k 2222/tcp || true
+          # 使用host网络模式启动，避开端口映射问题
           docker run -d --name tmate-private-server \
-          -p 2222:2222 \
-          -v ${{ github.workspace }}/tmate-server/keys:/etc/tmate-keys \
-          tmate/tmate-ssh-server:latest
-          # 等待容器启动
-          sleep 5
-          docker ps | grep tmate-private-server
-
-      - name: 校验tmate服务端运行状态
-        run: |
-          if ! docker ps | grep -q tmate-private-server; then
-            echo "❌ tmate服务端容器未正常运行，任务失败"
+            --net=host \
+            -v ${{ github.workspace }}/tmate-server/keys:/etc/tmate-keys \
+            tmate/tmate-ssh-server:latest
+          sleep 8
+          # 校验容器是否仍在运行
+          if ! docker ps --format '{{.Names}}' | grep -q tmate-private-server; then
+            echo "❌ 容器启动失败，打印日志排查"
+            docker logs tmate-private-server
             exit 1
           fi
 

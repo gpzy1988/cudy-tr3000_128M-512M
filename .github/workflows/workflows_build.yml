@@ -31,7 +31,7 @@ on:
         description: '指定源码commit，留空拉取最新'
         required: false
         type: string
-        default: ''
+        default: 'openwrt-24.10-6.6'
       ssh:
         description: '开启SSH配置 (仅DIY Custom有效)'
         required: false

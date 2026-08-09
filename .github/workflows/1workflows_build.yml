@@ -1,4 +1,4 @@
-name: 1 ImmortalWrt TTYd 网页终端编译生成器
+name: ImmortalWrt TTYd 网页终端编译生成器
 
 on:
   repository_dispatch:
@@ -83,7 +83,7 @@ jobs:
       - name: 初始化基础依赖环境
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y libncurses-dev build-essential git wget python3 bzip2
+          sudo apt-get install -y libncurses-dev build-essential git wget python3 bzip2 lsof
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
       - name: 克隆OpenWrt源码
@@ -112,25 +112,37 @@ jobs:
           make defconfig
       - name: 启动TTYd服务 + Cloudflare内网穿透隧道
         run: |
-          # 下载TTYd二进制程序
+          # 1. 下载TTYd二进制程序
           wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           chmod +x ttyd.x86_64
-          # 下载安装Cloudflared内网穿透工具
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          
+          # 2. 下载指定稳定版Cloudflared (2024.2.1)，避免最新版兼容性报错
+          wget -q https://github.com/cloudflare/cloudflared/releases/download/2024.2.1/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
-          # 强制分配伪终端+开启交互式Shell，彻底修复光标闪烁但无法输入的问题
+          
+          # 3. 端口清理：杀死可能占用7681端口的残留进程
+          sudo lsof -i :7681 | awk 'NR>1 {print $2}' | xargs sudo kill -9 2>/dev/null || true
+          
+          # 4. 启动TTYd：强制分配伪终端(-t) + 交互式Shell(bash -i)，修复输入无响应
           nohup ./ttyd.x86_64 -p 7681 -c ":$TERMINAL_PASS" -t bash -i &
-          echo "⏳ 正在生成公网隧道链接，等待8秒..."
-          # 强制开启WebSocket长连接+延长TCP保活超时，避免输入流被隧道服务截断
-          setsid cloudflared tunnel --url http://localhost:7681 --websocket --tcp-keepalive 30s > tunnel.log 2>&1 < /dev/null &
-          sleep 8
-          # 宽松正则提取隧道链接，兼容所有Cloudflare临时域名格式
-          TUNNEL_URL=$(grep -oP 'https://.*\.trycloudflare\.com' tunnel.log | head -n 1)
+          
+          echo "⏳ 正在生成公网隧道链接，等待10秒..."
+          
+          # 5. 启动Cloudflare隧道：双后台托管 + 禁用自动更新 + WebSocket长连接
+          nohup setsid cloudflared tunnel --url http://localhost:7681 --websocket --tcp-keepalive 30s --no-autoupdate > tunnel.log 2>&1 < /dev/null &
+          
+          sleep 10
+          
+          # 6. 提取隧道链接：使用兼容性更强的正则表达式
+          TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' tunnel.log | head -n 1)
+          
+          # 7. 异常处理：若链接为空，输出完整日志以便排查
           if [ -z "$TUNNEL_URL" ]; then
-            echo "❌ 隧道链接生成失败，打印日志排查问题："
+            echo "❌ 隧道启动失败，完整日志如下："
             cat tunnel.log
             exit 1
           fi
+          
           echo "========================================"
           echo "✅ 网页终端已成功启动！"
           echo "🔗 访问地址：$TUNNEL_URL"
@@ -138,25 +150,31 @@ jobs:
           echo "⚠️  请保持当前Workflow页面打开，你有30分钟操作时间"
           echo "💡 操作完成后手动取消当前Workflow运行，配置会自动保存回仓库"
           echo "========================================"
-          # 阻塞进程保持会话运行，直到手动取消或30分钟超时
+          
+          # 8. 阻塞进程保持会话运行
           tail -f /dev/null
         timeout-minutes: 30
+
       - name: 保存自定义配置回仓库
         if: success() || failure() || cancelled()
         run: |
-          # 容错判断，不存在.config时自动生成默认配置
+          # 容错判断：若.config不存在则生成默认配置
           [ ! -f /workdir/openwrt/.config ] && make -C /workdir/openwrt defconfig
-          # 复制自定义配置回仓库
+          # 复制配置回仓库
           cp -f /workdir/openwrt/.config $GITHUB_WORKSPACE/${CONFIG_FILE} || true
+          
           cd $GITHUB_WORKSPACE
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # 自动暂存本地未提交修改，解决unstage冲突报错
+          
+          # 自动暂存本地修改，避免pull冲突
           git stash push -m "auto-stash before pull"
-          # 动态获取当前配置仓库分支，彻底解决硬编码分支导致的找不到远程引用报错
+          
+          # 动态获取当前分支并拉取最新代码
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           git pull origin $CURRENT_BRANCH --rebase
           git stash pop || true
+          
           git add $CONFIG_FILE
           git diff --cached --quiet || (
             git commit -m "Update config: ${CONFIG_FILE}"
@@ -267,7 +285,7 @@ jobs:
             echo "::endgroup::"
           done
           ccache -s
-          # 全量扫描所有固件文件，避免固件收集遗漏
+          # 全量扫描所有固件文件，避免遗漏
           find bin/targets -type f $ -name "*sysupgrade.bin" -o -name "*factory.bin" -o -name "*.img" -o -name "*.tar.gz" $ -exec cp {} $GITHUB_WORKSPACE/firmware_collection/ \; 2>/dev/null || true
           echo "status=success" >> $GITHUB_OUTPUT
       - name: 上传固件制品

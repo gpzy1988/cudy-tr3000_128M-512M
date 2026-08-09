@@ -1,5 +1,5 @@
 
-name: ImmortalWrt 固件自动编译构建器
+name: 2ImmortalWrt 固件自动编译构建器
 
 on:
   repository_dispatch:

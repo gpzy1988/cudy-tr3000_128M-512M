@@ -1,4 +1,5 @@
-name: 1 I11mmortalWrt 固件自动编译构建器1
+
+name: 2ImmortalWrt 固件自动编译构建器
 
 on:
   repository_dispatch:
@@ -86,22 +87,60 @@ jobs:
       
       - name: 修复依赖冲突并安装Docker
         run: |
-          # 1. 强制卸载系统预装的冲突包
-          sudo apt-get remove -y containerd docker.io runc
-          sudo apt-get autoremove -y
-          
-          # 2. 解除所有held状态的包
+          # 1. 解除所有被 hold 的包限制
           sudo apt-mark unhold $(sudo apt-mark showhold) || true
           
-          # 3. 更新索引并重新安装 docker.io (Ubuntu官方源版本，依赖关系最稳定)
-          sudo apt-get update -qq
-          sudo apt-get install -y docker.io curl
+          # 2. 强制卸载所有与 Docker/Containerd 相关的预装包
+          sudo apt-get remove -y --purge \
+            containerd \
+            containerd.io \
+            docker.io \
+            docker-compose \
+            docker-compose-v2 \
+            runc \
+            moby-containerd \
+            moby-runc || true
+            
+          # 3. 清理残留依赖和配置文件
+          sudo apt-get autoremove -y --purge
+          sudo apt-get clean
           
-          # 4. 启动Docker服务
+          # 4. 更新软件源索引
+          sudo apt-get update -qq
+          
+          # 5. 安装必要的依赖工具
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            gnupg \
+            lsb-release
+          
+          # 6. 添加 Docker 官方 GPG 密钥和仓库
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+          
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          
+          # 7. 再次更新索引以识别新仓库
+          sudo apt-get update -qq
+          
+          # 8. 安装 Docker CE (包含 containerd.io)
+          sudo apt-get install -y --no-install-recommends \
+            docker-ce \
+            docker-ce-cli \
+            containerd.io \
+            docker-buildx-plugin \
+            docker-compose-plugin
+          
+          # 9. 启动 Docker 服务
           sudo systemctl start docker
           sudo systemctl enable docker
           
-          # 5. 验证安装
+          # 10. 验证安装
           docker --version
           docker info
 
@@ -322,9 +361,9 @@ jobs:
           echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
           cat > release.txt << EOF
           ## 📦 ImmortalWrt 固件
-          &zwnj;**版本标签:**&zwnj; $BUILD_TIME
-          &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
-          &zwnj;**目标设备:**&zwnj; ${DEVICE_INPUT}
+          **版本标签:** $BUILD_TIME
+          **源码分支:** $REPO_BRANCH
+          **目标设备:** ${DEVICE_INPUT}
           EOF
           echo "status=success" >> $GITHUB_OUTPUT
       - name: 上传固件到Release发布页

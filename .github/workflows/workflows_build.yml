@@ -1,4 +1,4 @@
-name: ImmortalWrt DIY Builder Fixed
+name: ImmortalWrt DIY Builder
 
 on:
   repository_dispatch:
@@ -33,7 +33,7 @@ on:
         type: string
         default: 'openwrt-24.10-6.6'
       ssh:
-        description: '开启SSH配置 (仅DIY Custom有效)'
+        description: '开启SSH配置 (all无效)'
         required: false
         type: boolean
         default: false
@@ -68,8 +68,8 @@ env:
 
 jobs:
   menuconfig:
-    name: ⚙️ Menuconfig Config
-    if: github.event.inputs.ssh == 'true' && github.event.inputs.device == 'DIY Custom'
+    name: ⚙️ Menuconfig
+    if: github.event.inputs.ssh == 'true' && github.event.inputs.device != 'all'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -86,7 +86,14 @@ jobs:
           git clone $REPO_URL -b $REPO_BRANCH --single-branch --filter=blob:none openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
       - name: Set Config Var
-        run: echo "CONFIG_FILE=config/diy-custom.config" >> $GITHUB_ENV
+        run: |
+          case "$DEVICE_INPUT" in
+            "512M") echo "CONFIG_FILE=config/512m.config" >> $GITHUB_ENV ;; 
+            "256M") echo "CONFIG_FILE=config/256m.config" >> $GITHUB_ENV ;;
+            "128M") echo "CONFIG_FILE=config/128m.config" >> $GITHUB_ENV ;;
+            "128M-Ubootmod") echo "CONFIG_FILE=config/128muboot.config" >> $GITHUB_ENV ;;
+            "DIY Custom") echo "CONFIG_FILE=config/diy-custom.config" >> $GITHUB_ENV ;;
+          esac
       - name: Load Feeds & Config
         run: |
           [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
@@ -105,21 +112,17 @@ jobs:
           cd $GITHUB_WORKSPACE
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # 核心修复：先暂存本地可能存在的其他修改
+          # 自动暂存本地可能存在的未提交修改，解决unstage冲突报错
           git stash push -m "auto-stash before pull"
-          # 拉取远程最新代码
-          git pull origin $REPO_BRANCH --rebase
-          # 恢复暂存的修改（即我们的新config）
+          # 自动获取当前配置仓库的运行分支，不再硬编码main，彻底解决分支引用找不到的报错
+          git pull origin $(git rev-parse --abbrev-ref HEAD) --rebase
+          # 恢复我们修改的DIY配置文件
           git stash pop
-          # 仅添加目标配置文件
-          git add ${CONFIG_FILE}
-          # 检测是否有实际变更，有则提交推送
-          if ! git diff --cached --quiet; then
+          git add $CONFIG_FILE
+          git diff --cached --quiet || (
             git commit -m "Update config: ${CONFIG_FILE}"
-            git push origin $REPO_BRANCH
-          else
-            echo "No changes to commit."
-          fi
+            git push origin $(git rev-parse --abbrev-ref HEAD)
+          )
 
   build:
     name: 🔨 Build Firmware
@@ -158,7 +161,7 @@ jobs:
       - name: Config Hash
         id: config-hash
         run: |
-          FIRST_DEV_CONFIG="config/128muboot.config"
+          FIRST_DEV_CONFIG="config/512m.config"
           if [ "${DEVICE_INPUT}" != "all" ]; then
             case "$DEVICE_INPUT" in
               "512M") FIRST_DEV_CONFIG="config/512m.config" ;;

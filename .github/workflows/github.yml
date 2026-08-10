@@ -36,6 +36,16 @@ on:
         required: false
         type: boolean
         default: false
+      user-ssh:
+        description: '指定ssh用户名'
+        required: false
+        type: string
+        default: 'openwrt'
+      password-ssh:
+        description: '指定ssh密码'
+        required: false
+        type: string
+        default: 'ImmortalWrt@2026'
       release:
         description: '将编译完成的固件发布到GitHub Release'
         required: false
@@ -64,13 +74,13 @@ env:
   UPLOAD_RELEASE: ${{ github.event.inputs.release || github.event.client_payload.release }}
   PRERELEASE: ${{ github.event.inputs.prerelease }}
   TZ: Asia/Shanghai
-  # 预设用户名密码，可直接在此处修改自定义
-  TMATE_USER: openwrt
-  TMATE_PASS: ImmortalWrt@2026
+  # 预设用户名密码，可直接在此处或Workflow运行页修改自定义
+  TMATE_USER: ${{ github.event.inputs.user-ssh }}
+  TMATE_PASS: ${{ github.event.inputs.password-ssh }}
 
 jobs:
   tmate-selfhost-server:
-    name: 🚀 部署密码认证tmate服务端
+    name: 🚀 部署自建密码认证SSH服务端
     runs-on: ubuntu-22.04
     if: github.event.inputs.ssh == 'true'
     outputs:
@@ -100,24 +110,30 @@ jobs:
           sudo systemctl enable docker
           docker --version
 
-      - name: 创建预设登录账号
+      - name: 创建预设系统登录账号
         run: |
           sudo useradd -m $TMATE_USER
           echo "$TMATE_USER:$TMATE_PASS" | sudo chpasswd
           sudo id $TMATE_USER
 
-      - name: 启动密码认证tmate容器
+      - name: 启动自建密码认证SSH容器
         run: |
           docker rm -f tmate-private-server || true
           sudo fuser -k 2222/tcp || true
-          # 内置轻量SSH服务，完全替代原tmate-ssh-server，纯密码认证无密钥依赖
           docker run -d --name tmate-private-server \
             --net=host \
             -e PASSWORD_ACCESS=true \
             -e USER_NAME=$TMATE_USER \
             -e USER_PASSWORD=$TMATE_PASS \
+            -e PORT=2222 \
             lscr.io/linuxserver/openssh-server:latest
-          sleep 8
+          sleep 10
+          ss -tuln | grep :2222
+          if [ $? -ne 0 ]; then
+            echo "❌ 容器端口未正常监听"
+            docker logs tmate-private-server
+            exit 1
+          fi
           if ! docker ps --format '{{.Names}}' | grep -q tmate-private-server; then
             echo "❌ 容器启动失败，打印日志排查"
             docker logs tmate-private-server
@@ -128,9 +144,12 @@ jobs:
         id: info
         run: |
           PUBLIC_IP=$(curl -s ifconfig.me)
+          if [ -z "$PUBLIC_IP" ]; then
+            PUBLIC_IP=$(hostname -I | awk '{print $1}')
+          fi
           echo "server-host=$PUBLIC_IP" >> $GITHUB_OUTPUT
           echo "server-port=2222" >> $GITHUB_OUTPUT
-          echo "✅ 私有Tmate服务端已启动: $PUBLIC_IP:2222"
+          echo "✅ 自建SSH服务端已启动: $PUBLIC_IP:2222"
           echo "登录账号: $TMATE_USER"
           echo "登录密码: $TMATE_PASS"
 
@@ -173,13 +192,15 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp -f $GITHUB_WORKSPACE/$CONFIG_FILE .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
-      - name: 开启密码认证SSH交互式会话
+      - name: 强制连接自建SSH服务端开启交互式会话
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15
         with:
-          server-address: ${{ needs.tmate-selfhost-server.outputs.server-host }}:${{ needs.tmate-selfhost-server.outputs.server-port }}
+          server-address: ${{ needs.tmate-selfhost-server.outputs.server-host }}:2222
           user: ${{ needs.tmate-selfhost-server.outputs.tmate-user }}
           password: ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}
+          detached: true
+          no-remote-config: true
       - name: 推送自定义配置到仓库
         run: |
           cp -f /workdir/openwrt/.config $GITHUB_WORKSPACE/${CONFIG_FILE}
@@ -187,10 +208,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add $CONFIG_FILE
-          git diff --cached --quiet || (
-            git commit -m "更新配置: ${CONFIG_FILE}"
-            git pull --rebase origin main
-            git push
+          git diff --cached --quiet || (\
+            git commit -m "更新配置: ${CONFIG_FILE}" && \
+            git pull --rebase origin main && \
+            git push \
           )
 
   build:
@@ -309,3 +330,36 @@ jobs:
         if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'
         run: |
           BUILD_TIME=$(date +"%Y.%m.%d-%H%M")
+          echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
+          cat > release.txt << EOF
+          ## 📦 ImmortalWrt 固件
+          &zwnj;**版本标签:**&zwnj; $BUILD_TIME
+          &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
+          &zwnj;**目标设备:**&zwnj; ${DEVICE_INPUT}
+          EOF
+          echo "status=success" >> $GITHUB_OUTPUT
+      - name: 上传固件到Release发布页
+        uses: softprops/action-gh-release@v2
+        if: steps.tag.outputs.status == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          prerelease: ${{ env.PRERELEASE == 'true' }}
+          files: |
+            /workdir/openwrt/bin/targets/*/*/*sysupgrade.bin
+            /workdir/openwrt/bin/targets/*/*/*factory.bin
+      - name: 清理历史工作流运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          retain_days: 3
+          keep_minimum_runs: 9
+      - name: 清理旧版本Release
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        with:
+          keep_latest: 3
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

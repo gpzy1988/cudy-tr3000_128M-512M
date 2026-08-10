@@ -219,13 +219,24 @@ jobs:
           echo "tmate -S /tmp/tmate.s set tmate-ssh-password ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> ~/.tmate.conf
           echo "✅ 已100%屏蔽所有官方tmate地址，强制锁定自建服务端"
       - name: 强制连接自建SSH服务端开启交互式会话
-        uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15
-        with:
-          tmate-server-host: ${{ needs.tmate-selfhost-server.outputs.server-host }}
-          tmate-server-port: 2222
-          detached: true
-          no-remote-config: true
+        run: |
+          # 自动打印可直接复制的连接信息
+          PUBLIC_IP=${{ needs.tmate-selfhost-server.outputs.server-host }}
+          echo "====================================="
+          echo "✅ 可直接复制的SSH连接命令："
+          echo "ssh $TMATE_USER@$PUBLIC_IP -p 2222"
+          echo "账号：$TMATE_USER"
+          echo "密码：$TMATE_PASS"
+          echo "====================================="
+          echo "✅ 已100%屏蔽所有官方tmate地址，强制锁定自建服务端"
+          # 启动后台常驻SSH会话，保持连接15分钟
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            $TMATE_USER@$PUBLIC_IP -p 2222 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=30 \
+            "sleep 900"
+
       - name: 推送自定义配置到仓库
         run: |
           cp -f /workdir/openwrt/.config $GITHUB_WORKSPACE/${CONFIG_FILE}

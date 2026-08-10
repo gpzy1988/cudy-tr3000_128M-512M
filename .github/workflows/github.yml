@@ -194,8 +194,16 @@ jobs:
           $GITHUB_WORKSPACE/$DIY_P2_SH
       - name: 强制屏蔽官方tmate服务器配置
         run: |
-          # 清空所有默认tmate配置缓存
-          rm -rf ~/.tmate.conf ~/.tmate/* /tmp/tmate.s*
+          # 杀死所有残留的tmate后台进程，避免偷偷连接官方服务器
+          pkill -9 tmate || true
+          pkill -f "tmate.io" || true
+          # 清空所有默认tmate配置缓存、临时套接字文件
+          rm -rf ~/.tmate.conf ~/.tmate/* /tmp/tmate.s* /usr/local/bin/tmate
+          # 全局注入只读自建服务端环境变量，强制覆盖所有官方默认配置
+          echo "TMATE_SERVER_HOST=${{ needs.tmate-selfhost-server.outputs.server-host }}" >> $GITHUB_ENV
+          echo "TMATE_SERVER_PORT=2222" >> $GITHUB_ENV
+          echo "TMATE_SSH_USER=${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> $GITHUB_ENV
+          echo "TMATE_SSH_PASS=${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> $GITHUB_ENV
           # 硬编码写入唯一自建服务端配置，优先级高于所有action内置配置
           echo "tmux set exit-empty on" > ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s new-session -d" >> ~/.tmate.conf
@@ -203,7 +211,7 @@ jobs:
           echo "tmate -S /tmp/tmate.s set tmate-server-port 2222" >> ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s set tmate-ssh-username ${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s set tmate-ssh-password ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> ~/.tmate.conf
-          echo "✅ 已强制锁定仅可连接自建SSH服务端"
+          echo "✅ 已强制锁定仅可连接自建SSH服务端，完全屏蔽tmate.io相关所有官方地址"
       - name: 强制连接自建SSH服务端开启交互式会话
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15
@@ -313,7 +321,8 @@ jobs:
             case "$DEV" in
               "512M") CONFIG="config/512m.config" ;;
               "256M") CONFIG="config/256m.config" ;;
-              "128M") CONFIG修改版") CONFIG="config/128muboot.config" ;;
+              "128M") CONFIG="config/128m.config" ;;
+              "128M-Uboot修改版") CONFIG="config/128muboot.config" ;;
             esac
             cp -f $GITHUB_WORKSPACE/$CONFIG .config
             make defconfig
@@ -361,6 +370,10 @@ jobs:
           files: |
             /workdir/openwrt/bin/targets/*/*/*sysupgrade.bin
             /workdir/openwrt/bin/targets/*/*/*factory.bin
+            /workdir/openwrt/bin/targets/*/*/*.img.*
+            /workdir/openwrt/bin/targets/*/*/*.tar.*
+            /workdir/openwrt/bin/targets/*/*/*.7z
+            /workdir/openwrt/bin/targets/*/*/*.sha256sums
       - name: 清理历史工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
@@ -372,5 +385,6 @@ jobs:
         with:
           keep_latest: 3
           delete_tags: true
+          skip_tags_with_no_release: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

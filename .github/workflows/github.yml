@@ -1,3 +1,4 @@
+
 name: 2ImmortalWrt 固件自动编译构建器
 
 on:
@@ -74,7 +75,6 @@ env:
   UPLOAD_RELEASE: ${{ github.event.inputs.release || github.event.client_payload.release }}
   PRERELEASE: ${{ github.event.inputs.prerelease }}
   TZ: Asia/Shanghai
-  # 预设用户名密码，可直接在此处或Workflow运行页修改自定义
   TMATE_USER: ${{ github.event.inputs.user-ssh }}
   TMATE_PASS: ${{ github.event.inputs.password-ssh }}
 
@@ -121,7 +121,7 @@ jobs:
           docker rm -f tmate-private-server || true
           sudo fuser -k 2222/tcp || true
           docker run -d --name tmate-private-server \
-            -p 2222:2222 \
+            --network host \
             -e PASSWORD_ACCESS=true \
             -e USER_NAME=$TMATE_USER \
             -e USER_PASSWORD=$TMATE_PASS \
@@ -192,26 +192,33 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp -f $GITHUB_WORKSPACE/$CONFIG_FILE .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
-      - name: 强制屏蔽官方tmate服务器配置
+      - name: 彻底屏蔽官方tmate服务器
         run: |
-          # 杀死所有残留的tmate后台进程，避免偷偷连接官方服务器
-          pkill -9 tmate || true
-          pkill -f "tmate.io" || true
-          # 清空所有默认tmate配置缓存、临时套接字文件
-          rm -rf ~/.tmate.conf ~/.tmate/* /tmp/tmate.s* /usr/local/bin/tmate
-          # 全局注入只读自建服务端环境变量，强制覆盖所有官方默认配置
+          # 杀死所有残留tmate进程
+          sudo pkill -9 tmate || true
+          sudo pkill -f "tmate.io" || true
+          # 彻底删除所有tmate二进制文件
+          sudo rm -rf /usr/bin/tmate /usr/local/bin/tmate
+          # Hosts硬屏蔽所有官方域名
+          sudo sed -i '/tmate.io/d' /etc/hosts
+          echo "127.0.0.1 tmate.io sfo.tmate.io nyc.tmate.io ams.tmate.io sg.tmate.io" | sudo tee -a /etc/hosts
+          # 开放2222端口出站权限
+          sudo iptables -I OUTPUT -p tcp --dport 2222 -j ACCEPT
+          sudo iptables -I INPUT -p tcp --sport 2222 -j ACCEPT
+          # 全局注入自建服务端环境变量
           echo "TMATE_SERVER_HOST=${{ needs.tmate-selfhost-server.outputs.server-host }}" >> $GITHUB_ENV
           echo "TMATE_SERVER_PORT=2222" >> $GITHUB_ENV
           echo "TMATE_SSH_USER=${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> $GITHUB_ENV
           echo "TMATE_SSH_PASS=${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> $GITHUB_ENV
-          # 硬编码写入唯一自建服务端配置，优先级高于所有action内置配置
+          # 写入唯一自建服务端配置
+          rm -rf ~/.tmate.conf ~/.tmate/* /tmp/tmate.s*
           echo "tmux set exit-empty on" > ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s new-session -d" >> ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s set tmate-server-host ${{ needs.tmate-selfhost-server.outputs.server-host }}" >> ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s set tmate-server-port 2222" >> ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s set tmate-ssh-username ${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> ~/.tmate.conf
           echo "tmate -S /tmp/tmate.s set tmate-ssh-password ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> ~/.tmate.conf
-          echo "✅ 已强制锁定仅可连接自建SSH服务端，完全屏蔽tmate.io相关所有官方地址"
+          echo "✅ 已100%屏蔽所有官方tmate地址，强制锁定自建服务端"
       - name: 强制连接自建SSH服务端开启交互式会话
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15

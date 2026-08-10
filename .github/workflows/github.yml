@@ -257,6 +257,10 @@ jobs:
           files: |
             /workdir/openwrt/bin/targets/*/*/*sysupgrade.bin
             /workdir/openwrt/bin/targets/*/*/*factory.bin
+            /workdir/openwrt/bin/targets/*/*/*.img.*
+            /workdir/openwrt/bin/targets/*/*/*.tar.*
+            /workdir/openwrt/bin/targets/*/*/*.7z
+            /workdir/openwrt/bin/targets/*/*/*.sha256sums
       - name: 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:

@@ -121,13 +121,13 @@ jobs:
           docker rm -f tmate-private-server || true
           sudo fuser -k 2222/tcp || true
           docker run -d --name tmate-private-server \
-            --net=host \
+            -p 2222:2222 \
             -e PASSWORD_ACCESS=true \
             -e USER_NAME=$TMATE_USER \
             -e USER_PASSWORD=$TMATE_PASS \
             -e PORT=2222 \
             lscr.io/linuxserver/openssh-server:latest
-          sleep 10
+          sleep 30
           ss -tuln | grep :2222
           if [ $? -ne 0 ]; then
             echo "❌ 容器端口未正常监听"
@@ -192,11 +192,23 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp -f $GITHUB_WORKSPACE/$CONFIG_FILE .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
+      - name: 强制屏蔽官方tmate服务器配置
+        run: |
+          # 清空所有默认tmate配置缓存
+          rm -rf ~/.tmate.conf ~/.tmate/* /tmp/tmate.s*
+          # 硬编码写入唯一自建服务端配置，优先级高于所有action内置配置
+          echo "tmux set exit-empty on" > ~/.tmate.conf
+          echo "tmate -S /tmp/tmate.s new-session -d" >> ~/.tmate.conf
+          echo "tmate -S /tmp/tmate.s set tmate-server-host ${{ needs.tmate-selfhost-server.outputs.server-host }}" >> ~/.tmate.conf
+          echo "tmate -S /tmp/tmate.s set tmate-server-port 2222" >> ~/.tmate.conf
+          echo "tmate -S /tmp/tmate.s set tmate-ssh-username ${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> ~/.tmate.conf
+          echo "tmate -S /tmp/tmate.s set tmate-ssh-password ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> ~/.tmate.conf
+          echo "✅ 已强制锁定仅可连接自建SSH服务端"
       - name: 强制连接自建SSH服务端开启交互式会话
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15
         with:
-          server-address: ${{ needs.tmate-selfhost-server.outputs.server-host }}:2222
+          server-address: ${{ needs.tmate-selfhost-server.outputs.server-host }}:${{ needs.tmate-selfhost-server.outputs.server-port }}
           user: ${{ needs.tmate-selfhost-server.outputs.tmate-user }}
           password: ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}
           detached: true
@@ -301,8 +313,7 @@ jobs:
             case "$DEV" in
               "512M") CONFIG="config/512m.config" ;;
               "256M") CONFIG="config/256m.config" ;;
-              "128M") CONFIG="config/128m.config" ;;
-              "128M-Uboot修改版") CONFIG="config/128muboot.config" ;;
+              "128M") CONFIG修改版") CONFIG="config/128muboot.config" ;;
             esac
             cp -f $GITHUB_WORKSPACE/$CONFIG .config
             make defconfig

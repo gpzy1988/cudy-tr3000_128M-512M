@@ -249,14 +249,15 @@ jobs:
           )
 
   build:
-    name: 🔨 编译固件
-    needs: menuconfig
-     # 完全保留原有always()关键字，仅追加状态校验拦截规则，tmate部署失败后自动终止流程
-      if: always() && 
-       !cancelled() &&
-       (needs.menuconfig.result == 'success' || needs.menuconfig.result == 'skipped') &&
-       (github.event.inputs.ssh != 'true' || needs.tmate-selfhost-server.result == 'success')
+    name: 编译固件
+    # 显式声明完整依赖，彻底消除上下文访问无效警告
+    needs: [tmate-selfhost-server, menuconfig]
     runs-on: ubuntu-22.04
+    # 移除always()，使用兼容全版本Actions的条件判断
+    if: |
+      !cancelled() &&
+      contains('success skipped', needs.menuconfig.result) &&
+      (github.event.inputs.ssh != 'true' || needs.tmate-selfhost-server.result == 'success')
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
@@ -340,61 +341,4 @@ jobs:
               "128M-Uboot修改版") CONFIG="config/128muboot.config" ;;
             esac
             cp -f $GITHUB_WORKSPACE/$CONFIG .config
-            make defconfig
-            make download -j$(nproc)
-            find dl -size -1024c -exec rm -f {} \;
-            if make -j$(nproc) CC="ccache gcc" CXX="ccache g++"; then
-              echo "✅ $DEV 设备固件编译成功"
-            else
-              make -j1 V=s || exit 1
-            fi
-            echo "::endgroup::"
-          done
-          ccache -s
-          cp -rf bin/targets/*/*/* $GITHUB_WORKSPACE/firmware_collection/ 2>/dev/null || true
-          echo "status=success" >> $GITHUB_OUTPUT
-      - name: 上传固件构建产物
-        uses: actions/upload-artifact@v4
-        if: steps.compile.outputs.status == 'success'
-        with:
-          name: ImmortalWrt_${{ env.DEVICE_INPUT }}
-          path: ${{ github.workspace }}/firmware_collection/*
-          compression-level: 9
-      - name: 生成Release发布信息
-        id: tag
-        if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'
-        run: |
-          BUILD_TIME=$(date +"%Y.%m.%d-%H%M")
-          echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
-          cat > release.txt << EOF
-          ## 📦 ImmortalWrt 固件
-          &zwnj;**版本标签:**&zwnj; $BUILD_TIME
-          &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
-          &zwnj;**目标设备:**&zwnj; ${DEVICE_INPUT}
-          EOF
-          echo "status=success" >> $GITHUB_OUTPUT
-      - name: 上传固件到Release发布页
-        uses: softprops/action-gh-release@v2
-        if: steps.tag.outputs.status == 'success'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          body_path: release.txt
-          prerelease: ${{ env.PRERELEASE == 'true' }}
-          files: |
-            /workdir/openwrt/bin/targets/*/*/*sysupgrade.bin
-            /workdir/openwrt/bin/targets/*/*/*factory.bin
-      - name: 清理历史工作流运行记录
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          retain_days: 3
-          keep_minimum_runs: 9
-      - name: 清理旧版本Release
-        uses: dev-drprasad/delete-older-releases@v0.3.4
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-        with:
-          keep_latest: 3
-          delete_tags: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+           

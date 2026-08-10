@@ -1,53 +1,44 @@
-name: 2ImmortalWrt 固件自动编译构建器
+name: openwrt 自定义编译构建器
 
 on:
   repository_dispatch:
-    types: [ "源码更新触发" ]
+    types: [ "源代码更新" ]
   workflow_dispatch:
     inputs:
       device:
-        description: '编译目标设备型号'
+        description: '编译设备型号'
         required: true
         type: choice
-        default: '全部设备'
+        default: '全部'
         options:
           - '512M'
           - '256M'
           - '128M'
-          - '128M-Uboot修改版'
-          - '全部设备' 
+          - '128M-Ubootmod'
+          - '自定义型号'
+          - '全部' 
       repo:
-        description: '指定OpenWrt源码仓库地址'
+        description: '指定源码仓库地址'
         required: true
         type: string
         default: 'https://github.com/padavanonly/immortalwrt-mt798x-6.6'
       branch:
-        description: '指定源码分支，留空则拉取最新分支'
+        description: '指定源码分支，留空自动拉取最新分支'
         required: false
         type: string
         default: 'openwrt-24.10-6.6'
       commit:
-        description: '指定源码提交版本，留空则拉取最新提交'
+        description: '指定源码提交版本，留空自动拉取最新提交'
         required: false
         type: string
         default: 'openwrt-24.10-6.6'
       ssh:
-        description: '开启交互式SSH配置终端（全部设备模式下该选项无效）'
+        description: '开启SSH远程配置界面 (选择全部设备时该选项无效)'
         required: false
         type: boolean
         default: false
-      user-ssh:
-        description: '指定ssh用户名'
-        required: false
-        type: string
-        default: 'openwrt'
-      password-ssh:
-        description: '指定ssh密码'
-        required: false
-        type: string
-        default: 'ImmortalWrt@2026'
       release:
-        description: '将编译完成的固件发布到GitHub Release'
+        description: '将编译完成的固件发布到Release发布页'
         required: false
         type: boolean
         default: true
@@ -58,7 +49,7 @@ on:
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.run_id }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -74,94 +65,14 @@ env:
   UPLOAD_RELEASE: ${{ github.event.inputs.release || github.event.client_payload.release }}
   PRERELEASE: ${{ github.event.inputs.prerelease }}
   TZ: Asia/Shanghai
-  TMATE_USER: ${{ github.event.inputs.user-ssh }}
-  TMATE_PASS: ${{ github.event.inputs.password-ssh }}
 
 jobs:
-  tmate-selfhost-server:
-    name: 🚀 部署自建密码认证SSH服务端
-    runs-on: ubuntu-22.04
-    if: github.event.inputs.ssh == 'true'
-    outputs:
-      server-host: ${{ steps.info.outputs.server-host }}
-      server-port: ${{ steps.info.outputs.server-port }}
-      tmate-user: ${{ env.TMATE_USER }}
-      tmate-pass: ${{ env.TMATE_PASS }}
-    steps:
-      - name: 拉取仓库代码
-        uses: actions/checkout@v4
-      
-      - name: 修复依赖冲突并安装Docker
-        run: |
-          sudo apt-mark unhold $(sudo apt-mark showhold) || true
-          sudo apt-get remove -y --purge containerd containerd.io docker.io docker-compose docker-compose-v2 runc moby-containerd moby-runc || true
-          sudo apt-get autoremove -y --purge
-          sudo apt-get clean
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release
-          sudo install -m 0755 -d /etc/apt/keyrings
-          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-          sudo chmod a+r /etc/apt/keyrings/docker.asc
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          sudo systemctl start docker
-          sudo systemctl enable docker
-          docker --version
-
-      - name: 创建预设系统登录账号
-        run: |
-          sudo useradd -m $TMATE_USER
-          echo "$TMATE_USER:$TMATE_PASS" | sudo chpasswd
-          sudo id $TMATE_USER
-
-      - name: 启动自建密码认证SSH容器
-        run: |
-          docker rm -f tmate-private-server || true
-          sudo fuser -k 2222/tcp || true
-          docker run -d --name tmate-private-server \
-            --network host \
-            -e PASSWORD_ACCESS=true \
-            -e USER_NAME=$TMATE_USER \
-            -e USER_PASSWORD=$TMATE_PASS \
-            -e PORT=2222 \
-            lscr.io/linuxserver/openssh-server:latest
-          sleep 30
-          ss -tuln | grep :2222
-          if [ $? -ne 0 ]; then
-            echo "❌ 容器端口未正常监听"
-            docker logs tmate-private-server
-            exit 1
-          fi
-          if ! docker ps --format '{{.Names}}' | grep -q tmate-private-server; then
-            echo "❌ 容器启动失败，打印日志排查"
-            docker logs tmate-private-server
-            exit 1
-          fi
-
-      - name: 获取服务端部署信息
-        id: info
-        run: |
-          PUBLIC_IP=$(curl -s ifconfig.me)
-          if [ -z "$PUBLIC_IP" ]; then
-            PUBLIC_IP=$(hostname -I | awk '{print $1}')
-          fi
-          echo "server-host=$PUBLIC_IP" >> $GITHUB_OUTPUT
-          echo "server-port=2222" >> $GITHUB_OUTPUT
-          echo "✅ 自建SSH服务端已启动: $PUBLIC_IP:2222"
-          echo "登录账号: $TMATE_USER"
-          echo "登录密码: $TMATE_PASS"
-
   menuconfig:
-    name: ⚙️ 自定义配置菜单
-    needs: tmate-selfhost-server
-    if: |
-      github.event.inputs.ssh == 'true' && 
-      github.event.inputs.device != '全部设备' &&
-      needs.tmate-selfhost-server.result == 'success'
+    name: ⚙️ 自定义配置固件
+    if: github.event.inputs.ssh == 'true' && github.event.inputs.device != '全部'
     runs-on: ubuntu-22.04
     steps:
-      - name: 拉取仓库代码
+      - name: 拉取本仓库代码
         uses: actions/checkout@v4
       - name: 初始化编译环境
         run: |
@@ -169,18 +80,19 @@ jobs:
           sudo apt-get install -y libncurses-dev build-essential git wget python3 bzip2
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
-      - name: 克隆源码
+      - name: 克隆OpenWrt源码
         working-directory: /workdir
         run: |
           git clone $REPO_URL -b $REPO_BRANCH --single-branch --filter=blob:none openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-      - name: 设置配置文件变量
+      - name: 加载对应设备配置文件
         run: |
           case "$DEVICE_INPUT" in
             "512M") echo "CONFIG_FILE=config/512m.config" >> $GITHUB_ENV ;; 
             "256M") echo "CONFIG_FILE=config/256m.config" >> $GITHUB_ENV ;;
             "128M") echo "CONFIG_FILE=config/128m.config" >> $GITHUB_ENV ;;
-            "128M-Uboot修改版") echo "CONFIG_FILE=config/128muboot.config" >> $GITHUB_ENV ;;
+            "128M-Ubootmod") echo "CONFIG_FILE=config/128muboot.config" >> $GITHUB_ENV ;;
+            "自定义型号") echo "CONFIG_FILE=config/custom_device.config" >> $GITHUB_ENV ;;
           esac
       - name: 加载软件源与基础配置
         run: |
@@ -191,78 +103,31 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp -f $GITHUB_WORKSPACE/$CONFIG_FILE .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
-      - name: 彻底屏蔽官方tmate服务器
-        run: |
-          # 杀死所有残留tmate进程
-          sudo pkill -9 tmate || true
-          sudo pkill -f "tmate.io" || true
-          # 彻底删除所有tmate二进制文件
-          sudo rm -rf /usr/bin/tmate /usr/local/bin/tmate
-          # Hosts硬屏蔽所有官方域名
-          sudo sed -i '/tmate.io/d' /etc/hosts
-          echo "127.0.0.1 tmate.io sfo.tmate.io nyc.tmate.io ams.tmate.io sg.tmate.io" | sudo tee -a /etc/hosts
-          # 开放2222端口出站权限
-          sudo iptables -I OUTPUT -p tcp --dport 2222 -j ACCEPT
-          sudo iptables -I INPUT -p tcp --sport 2222 -j ACCEPT
-          # 全局注入自建服务端环境变量
-          echo "TMATE_SERVER_HOST=${{ needs.tmate-selfhost-server.outputs.server-host }}" >> $GITHUB_ENV
-          echo "TMATE_SERVER_PORT=2222" >> $GITHUB_ENV
-          echo "TMATE_SSH_USER=${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> $GITHUB_ENV
-          echo "TMATE_SSH_PASS=${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> $GITHUB_ENV
-          # 写入唯一自建服务端配置
-          rm -rf ~/.tmate.conf ~/.tmate/* /tmp/tmate.s*
-          echo "tmux set exit-empty on" > ~/.tmate.conf
-          echo "tmate -S /tmp/tmate.s new-session -d" >> ~/.tmate.conf
-          echo "tmate -S /tmp/tmate.s set tmate-server-host ${{ needs.tmate-selfhost-server.outputs.server-host }}" >> ~/.tmate.conf
-          echo "tmate -S /tmp/tmate.s set tmate-server-port 2222" >> ~/.tmate.conf
-          echo "tmate -S /tmp/tmate.s set tmate-ssh-username ${{ needs.tmate-selfhost-server.outputs.tmate-user }}" >> ~/.tmate.conf
-          echo "tmate -S /tmp/tmate.s set tmate-ssh-password ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}" >> ~/.tmate.conf
-          echo "✅ 已100%屏蔽所有官方tmate地址，强制锁定自建服务端"
-      - name: 强制连接自建SSH服务端开启交互式会话
+      - name: 开启SSH远程连接会话
+        uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15
-        run: |
-          PUBLIC_IP=${{ needs.tmate-selfhost-server.outputs.server-host }}
-          echo "====================================="
-          echo "✅ 可直接复制的本地SSH连接命令："
-          echo "ssh $TMATE_USER@$PUBLIC_IP -p 2222"
-          echo "🌐 网页端Web SSH访问地址（浏览器直接打开）："
-          echo "https://$PUBLIC_IP:2222"
-          echo "账号：$TMATE_USER"
-          echo "密码：$TMATE_PASS"
-          echo "====================================="
-          echo "✅ 已100%屏蔽所有官方tmate地址，强制锁定自建服务端"
-          # 启动后台常驻SSH会话，保持连接15分钟
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            $TMATE_USER@$PUBLIC_IP -p 2222 \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=30 \
-            "sleep 900"
-
-      - name: 推送自定义配置到仓库
+      - name: 保存自定义配置到仓库
         run: |
           cp -f /workdir/openwrt/.config $GITHUB_WORKSPACE/${CONFIG_FILE}
           cd $GITHUB_WORKSPACE
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add $CONFIG_FILE
-          git diff --cached --quiet || (\
-            git commit -m "更新配置: ${CONFIG_FILE}" && \
-            git pull --rebase origin main && \
-            git push \
+          git diff --cached --quiet || (
+            git commit -m "更新配置文件: ${CONFIG_FILE}"
+            git pull --rebase origin main
+            git push
           )
 
   build:
-    name: 编译固件
-    needs: [tmate-selfhost-server, menuconfig]
+    name: 🔨 编译生成固件
+    needs: menuconfig
+    if: always() && (needs.menuconfig.result == 'success' || needs.menuconfig.result == 'skipped')
     runs-on: ubuntu-22.04
-    if: |
-      !cancelled() &&
-      contains('success skipped', needs.menuconfig.result) &&
-      (github.event.inputs.ssh != 'true' || needs.tmate-selfhost-server.result == 'success')
     steps:
-      - name: 拉取仓库代码
+      - name: 拉取本仓库代码
         uses: actions/checkout@v4
-      - name: 初始化编译环境
+      - name: 初始化完整编译环境
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -274,13 +139,13 @@ jobs:
           sudo timedatectl set-timezone "$TZ"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
-      - name: 克隆源码
+      - name: 克隆OpenWrt源码
         working-directory: /workdir
         run: |
           git clone $REPO_URL -b $REPO_BRANCH --single-branch --filter=blob:none openwrt
           if [ -n "${REPO_COMMIT}" ]; then cd openwrt && git checkout ${REPO_COMMIT}; fi
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-      - name: 加载软件源
+      - name: 加载软件源配置
         run: |
           [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
           chmod +x $DIY_P1_SH $DIY_P2_SH
@@ -288,46 +153,47 @@ jobs:
           $GITHUB_WORKSPACE/$DIY_P1_SH
           ./scripts/feeds update -a && ./scripts/feeds install -a
           $GITHUB_WORKSPACE/$DIY_P2_SH
-      - name: 生成配置哈希值
+      - name: 生成配置文件哈希值
         id: config-hash
         run: |
           FIRST_DEV_CONFIG="config/512m.config"
-          if [ "${DEVICE_INPUT}" != "全部设备" ]; then
+          if [ "${DEVICE_INPUT}" != "全部" ]; then
             case "${DEVICE_INPUT}" in
               "512M") FIRST_DEV_CONFIG="config/512m.config" ;;
               "256M") FIRST_DEV_CONFIG="config/256m.config" ;;
               "128M") FIRST_DEV_CONFIG="config/128m.config" ;;
-              "128M-Uboot修改版") FIRST_DEV_CONFIG="config/128muboot.config" ;;
+              "128M-Ubootmod") FIRST_DEV_CONFIG="config/128muboot.config" ;;
+              "自定义型号") FIRST_DEV_CONFIG="config/custom_device.config" ;;
             esac
           fi
           cp -f $GITHUB_WORKSPACE/$FIRST_DEV_CONFIG openwrt/.config
           cd openwrt && make defconfig
           CONFIG_HASH=$(md5sum .config | awk '{print $1}')
           echo "hash=$CONFIG_HASH" >> $GITHUB_OUTPUT
-      - name: 加载编译缓存
+      - name: 加载编译缓存加速编译
         uses: actions/cache@v4
         with:
           path: /workdir/.ccache
           key: ${{ runner.os }}-ccache-${{ env.REPO_BRANCH }}-${{ steps.config-hash.outputs.hash }}
           restore-keys: ${{ runner.os }}-ccache-${{ env.REPO_BRANCH }}-
-      - name: 加载下载资源缓存
+      - name: 加载依赖包缓存
         uses: actions/cache@v4
         with:
           path: /workdir/openwrt/dl
           key: ${{ runner.os }}-openwrt-dl-${{ env.REPO_BRANCH }}-${{ steps.config-hash.outputs.hash }}
           restore-keys: ${{ runner.os }}-openwrt-dl-${{ env.REPO_BRANCH }}-
-      - name: 配置编译加速缓存
+      - name: 配置编译缓存参数
         run: |
           ccache --set-config=max_size=$CCACHE_MAXSIZE
           ccache --set-config=cache_dir=$CCACHE_DIR
           ccache --set-config=compression=true
           ccache --set-config=compression_level=6
           ccache -z
-      - name: 多设备循环编译
+      - name: 批量编译固件
         id: compile
         run: |
-          if [ "${DEVICE_INPUT}" = "全部设备" ]; then
-            DEVICES="512M 256M 128M 128M-Uboot修改版"
+          if [ "${DEVICE_INPUT}" = "全部" ]; then
+            DEVICES="512M 256M 128M 128M-Ubootmod"
           else
             DEVICES="${DEVICE_INPUT}"
           fi
@@ -339,7 +205,8 @@ jobs:
               "512M") CONFIG="config/512m.config" ;;
               "256M") CONFIG="config/256m.config" ;;
               "128M") CONFIG="config/128m.config" ;;
-              "128M-Uboot修改版") CONFIG="config/128muboot.config" ;;
+              "128M-Ubootmod") CONFIG="config/128muboot.config" ;;
+              "自定义型号") CONFIG="config/custom_device.config" ;;
             esac
             cp -f $GITHUB_WORKSPACE/$CONFIG .config
             make defconfig
@@ -369,10 +236,10 @@ jobs:
           BUILD_TIME=$(date +"%Y.%m.%d-%H%M")
           echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
           cat > release.txt << EOF
-          ## 📦 ImmortalWrt 固件
-          &zwnj;**版本标签:**&zwnj; $BUILD_TIME
+          ## 📦 ImmortalWrt 自定义编译固件
+          &zwnj;**发布标签:**&zwnj; $BUILD_TIME
           &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
-          &zwnj;**目标设备:**&zwnj; ${DEVICE_INPUT}
+          &zwnj;**编译设备:**&zwnj; ${DEVICE_INPUT}
           EOF
           echo "status=success" >> $GITHUB_OUTPUT
       - name: 上传固件到Release发布页
@@ -387,21 +254,16 @@ jobs:
           files: |
             /workdir/openwrt/bin/targets/*/*/*sysupgrade.bin
             /workdir/openwrt/bin/targets/*/*/*factory.bin
-            /workdir/openwrt/bin/targets/*/*/*.img.*
-            /workdir/openwrt/bin/targets/*/*/*.tar.*
-            /workdir/openwrt/bin/targets/*/*/*.7z
-            /workdir/openwrt/bin/targets/*/*/*.sha256sums
-      - name: 清理历史工作流运行记录
+      - name: 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          retain_days: 3
+          retain_days: 0
           keep_minimum_runs: 9
-      - name: 清理旧版本Release
+      - name: 清理旧的Release版本
         uses: dev-drprasad/delete-older-releases@v0.3.4
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
           keep_latest: 3
           delete_tags: true
-          skip_tags_with_no_release: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

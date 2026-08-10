@@ -221,11 +221,12 @@ jobs:
       - name: 强制连接自建SSH服务端开启交互式会话
         timeout-minutes: 15
         run: |
-          # 自动打印可直接复制的连接信息
           PUBLIC_IP=${{ needs.tmate-selfhost-server.outputs.server-host }}
           echo "====================================="
-          echo "✅ 可直接复制的SSH连接命令："
+          echo "✅ 可直接复制的本地SSH连接命令："
           echo "ssh $TMATE_USER@$PUBLIC_IP -p 2222"
+          echo "🌐 网页端Web SSH访问地址（浏览器直接打开）："
+          echo "https://$PUBLIC_IP:2222"
           echo "账号：$TMATE_USER"
           echo "密码：$TMATE_PASS"
           echo "====================================="

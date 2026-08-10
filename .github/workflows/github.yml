@@ -1,3 +1,4 @@
+
 name: openwrt 自定义编译构建器
 
 on:
@@ -31,7 +32,7 @@ on:
         description: '指定源码提交版本，留空自动拉取最新提交'
         required: false
         type: string
-        default: 'openwrt-24.10-6.6'
+        default: ''
       ssh:
         description: '开启SSH远程配置界面 (选择全部设备时该选项无效)'
         required: false
@@ -57,13 +58,13 @@ env:
   CCACHE_DIR: /workdir/.ccache
   CCACHE_MAXSIZE: 6G
   REPO_URL: ${{ github.event.inputs.repo || github.event.client_payload.repo }}
-  REPO_BRANCH: ${{ github.event.inputs.branch }}
-  REPO_COMMIT: ${{ github.event.inputs.commit }}
+  REPO_BRANCH: ${{ github.event.inputs.branch || github.event.client_payload.branch }}
+  REPO_COMMIT: ${{ github.event.inputs.commit || github.event.client_payload.commit }}
   FEEDS_CONF: feeds.conf.default
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   UPLOAD_RELEASE: ${{ github.event.inputs.release || github.event.client_payload.release }}
-  PRERELEASE: ${{ github.event.inputs.prerelease }}
+  PRERELEASE: ${{ github.event.inputs.prerelease || github.event.client_payload.prerelease }}
   TZ: Asia/Shanghai
 
 jobs:
@@ -115,7 +116,9 @@ jobs:
           git add $CONFIG_FILE
           git diff --cached --quiet || (
             git commit -m "更新配置文件: ${CONFIG_FILE}"
+            git stash push -m "临时暂存残留改动"
             git pull --rebase origin main
+            git stash pop
             git push
           )
 
@@ -237,9 +240,9 @@ jobs:
           echo "release_tag=$BUILD_TIME" >> $GITHUB_OUTPUT
           cat > release.txt << EOF
           ## 📦 ImmortalWrt 自定义编译固件
-          &zwnj;**发布标签:**&zwnj; $BUILD_TIME
-          &zwnj;**源码分支:**&zwnj; $REPO_BRANCH
-          &zwnj;**编译设备:**&zwnj; ${DEVICE_INPUT}
+          ‌&zwnj;**发布标签:**&zwnj;‌ $BUILD_TIME
+          ‌&zwnj;**源码分支:**&zwnj;‌ $REPO_BRANCH
+          ‌&zwnj;**编译设备:**&zwnj;‌ ${DEVICE_INPUT}
           EOF
           echo "status=success" >> $GITHUB_OUTPUT
       - name: 上传固件到Release发布页
@@ -257,7 +260,7 @@ jobs:
       - name: 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          retain_days: 0
+          retain_days: 30
           keep_minimum_runs: 9
       - name: 清理旧的Release版本
         uses: dev-drprasad/delete-older-releases@v0.3.4

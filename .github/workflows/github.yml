@@ -64,103 +64,60 @@ env:
   UPLOAD_RELEASE: ${{ github.event.inputs.release || github.event.client_payload.release }}
   PRERELEASE: ${{ github.event.inputs.prerelease }}
   TZ: Asia/Shanghai
+  # 预设用户名密码，可直接在此处修改自定义
+  TMATE_USER: openwrt
+  TMATE_PASS: ImmortalWrt@2026
 
 jobs:
   tmate-selfhost-server:
-    name: 🚀 部署私有tmate服务端
+    name: 🚀 部署密码认证tmate服务端
     runs-on: ubuntu-22.04
     if: github.event.inputs.ssh == 'true'
     outputs:
       server-host: ${{ steps.info.outputs.server-host }}
       server-port: ${{ steps.info.outputs.server-port }}
-      rsa-fingerprint: ${{ steps.info.outputs.rsa-fingerprint }}
-      ed25519-fingerprint: ${{ steps.info.outputs.ed25519-fingerprint }}
+      tmate-user: ${{ env.TMATE_USER }}
+      tmate-pass: ${{ env.TMATE_PASS }}
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
       
       - name: 修复依赖冲突并安装Docker
         run: |
-          # 1. 解除所有被 hold 的包限制
           sudo apt-mark unhold $(sudo apt-mark showhold) || true
-          
-          # 2. 强制卸载所有与 Docker/Containerd 相关的预装包
-          sudo apt-get remove -y --purge \
-            containerd \
-            containerd.io \
-            docker.io \
-            docker-compose \
-            docker-compose-v2 \
-            runc \
-            moby-containerd \
-            moby-runc || true
-            
-          # 3. 清理残留依赖和配置文件
+          sudo apt-get remove -y --purge containerd containerd.io docker.io docker-compose docker-compose-v2 runc moby-containerd moby-runc || true
           sudo apt-get autoremove -y --purge
           sudo apt-get clean
-          
-          # 4. 更新软件源索引
           sudo apt-get update -qq
-          
-          # 5. 安装必要的依赖工具
-          sudo apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            gnupg \
-            lsb-release
-          
-          # 6. 添加 Docker 官方 GPG 密钥和仓库
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release
           sudo install -m 0755 -d /etc/apt/keyrings
           sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
           sudo chmod a+r /etc/apt/keyrings/docker.asc
-          
-          echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          
-          # 7. 再次更新索引以识别新仓库
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
           sudo apt-get update -qq
-          
-          # 8. 安装 Docker CE (包含 containerd.io)
-          sudo apt-get install -y --no-install-recommends \
-            docker-ce \
-            docker-ce-cli \
-            containerd.io \
-            docker-buildx-plugin \
-            docker-compose-plugin
-          
-          # 9. 启动 Docker 服务
+          sudo apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
           sudo systemctl start docker
           sudo systemctl enable docker
-          
-          # 10. 验证安装
           docker --version
-          docker info
 
-      - name: 生成服务端专属密钥
+      - name: 创建预设登录账号
         run: |
-          mkdir -p tmate-server && cd tmate-server
-          # 下载并执行密钥生成脚本
-          curl -s -q https://raw.githubusercontent.com/tmate-io/tmate-ssh-server/master/create_keys.sh | bash
-          # 强制修正密钥权限，避免SSH服务拒绝加载
-          chmod 700 keys
-          chmod 600 keys/*
+          sudo useradd -m $TMATE_USER
+          echo "$TMATE_USER:$TMATE_PASS" | sudo chpasswd
+          sudo id $TMATE_USER
 
-      - name: 启动tmate服务端容器
+      - name: 启动密码认证tmate容器
         run: |
-          # 清理旧容器
           docker rm -f tmate-private-server || true
-          # 释放2222端口
           sudo fuser -k 2222/tcp || true
-          # 修复-k参数缺失问题，显式传入密钥目录路径，解决option requires an argument: k报错
+          # 内置轻量SSH服务，完全替代原tmate-ssh-server，纯密码认证无密钥依赖
           docker run -d --name tmate-private-server \
             --net=host \
-            -v ${{ github.workspace }}/tmate-server/keys:/etc/tmate-keys \
-            tmate/tmate-ssh-server:latest \
-            -k /etc/tmate-keys
+            -e PASSWORD_ACCESS=true \
+            -e USER_NAME=$TMATE_USER \
+            -e USER_PASSWORD=$TMATE_PASS \
+            lscr.io/linuxserver/openssh-server:latest
           sleep 8
-          # 校验容器是否仍在运行
           if ! docker ps --format '{{.Names}}' | grep -q tmate-private-server; then
             echo "❌ 容器启动失败，打印日志排查"
             docker logs tmate-private-server
@@ -173,12 +130,9 @@ jobs:
           PUBLIC_IP=$(curl -s ifconfig.me)
           echo "server-host=$PUBLIC_IP" >> $GITHUB_OUTPUT
           echo "server-port=2222" >> $GITHUB_OUTPUT
-          # 提取公钥指纹
-          RSA_FP=$(ssh-keygen -lf tmate-server/keys/ssh_host_rsa_key.pub | awk '{print $2}')
-          ED25519_FP=$(ssh-keygen -lf tmate-server/keys/ssh_host_ed25519_key.pub | awk '{print $2}')
-          echo "rsa-fingerprint=$RSA_FP" >> $GITHUB_OUTPUT
-          echo "ed25519-fingerprint=$ED25519_FP" >> $GITHUB_OUTPUT
           echo "✅ 私有Tmate服务端已启动: $PUBLIC_IP:2222"
+          echo "登录账号: $TMATE_USER"
+          echo "登录密码: $TMATE_PASS"
 
   menuconfig:
     name: ⚙️ 自定义配置菜单
@@ -204,20 +158,11 @@ jobs:
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
       - name: 设置配置文件变量
         run: |
-          # 修复sh out of range索引越界问题，补全所有分支的变量输出
           case "$DEVICE_INPUT" in
-            "512M") 
-              echo "CONFIG_FILE=config/512m.config" >> $GITHUB_ENV 
-              ;; 
-            "256M") 
-              echo "CONFIG_FILE=config/256m.config" >> $GITHUB_ENV 
-              ;;
-            "128M") 
-              echo "CONFIG_FILE=config/128m.config" >> $GITHUB_ENV 
-              ;;
-            "128M-Uboot修改版") 
-              echo "CONFIG_FILE=config/128muboot.config" >> $GITHUB_ENV 
-              ;;
+            "512M") echo "CONFIG_FILE=config/512m.config" >> $GITHUB_ENV ;; 
+            "256M") echo "CONFIG_FILE=config/256m.config" >> $GITHUB_ENV ;;
+            "128M") echo "CONFIG_FILE=config/128m.config" >> $GITHUB_ENV ;;
+            "128M-Uboot修改版") echo "CONFIG_FILE=config/128muboot.config" >> $GITHUB_ENV ;;
           esac
       - name: 加载软件源与基础配置
         run: |
@@ -228,13 +173,13 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp -f $GITHUB_WORKSPACE/$CONFIG_FILE .config
           $GITHUB_WORKSPACE/$DIY_P2_SH
-      - name: 开启私有tmate交互式SSH会话
+      - name: 开启密码认证SSH交互式会话
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 15
         with:
           server-address: ${{ needs.tmate-selfhost-server.outputs.server-host }}:${{ needs.tmate-selfhost-server.outputs.server-port }}
-          public-key: ${{ needs.tmate-selfhost-server.outputs.rsa-fingerprint }}
-          ed25519-key: ${{ needs.tmate-selfhost-server.outputs.ed25519-fingerprint }}
+          user: ${{ needs.tmate-selfhost-server.outputs.tmate-user }}
+          password: ${{ needs.tmate-selfhost-server.outputs.tmate-pass }}
       - name: 推送自定义配置到仓库
         run: |
           cp -f /workdir/openwrt/.config $GITHUB_WORKSPACE/${CONFIG_FILE}
@@ -250,10 +195,8 @@ jobs:
 
   build:
     name: 编译固件
-    # 显式声明完整依赖，彻底消除上下文访问无效警告
     needs: [tmate-selfhost-server, menuconfig]
     runs-on: ubuntu-22.04
-    # 移除always()，使用兼容全版本Actions的条件判断
     if: |
       !cancelled() &&
       contains('success skipped', needs.menuconfig.result) &&
@@ -341,4 +284,28 @@ jobs:
               "128M-Uboot修改版") CONFIG="config/128muboot.config" ;;
             esac
             cp -f $GITHUB_WORKSPACE/$CONFIG .config
-           
+            make defconfig
+            make download -j$(nproc)
+            find dl -size -1024c -exec rm -f {} \;
+            if make -j$(nproc) CC="ccache gcc" CXX="ccache g++"; then
+              echo "✅ $DEV 设备固件编译成功"
+            else
+              make -j1 V=s || exit 1
+            fi
+            echo "::endgroup::"
+          done
+          ccache -s
+          cp -rf bin/targets/*/*/* $GITHUB_WORKSPACE/firmware_collection/ 2>/dev/null || true
+          echo "status=success" >> $GITHUB_OUTPUT
+      - name: 上传固件构建产物
+        uses: actions/upload-artifact@v4
+        if: steps.compile.outputs.status == 'success'
+        with:
+          name: ImmortalWrt_${{ env.DEVICE_INPUT }}
+          path: ${{ github.workspace }}/firmware_collection/*
+          compression-level: 9
+      - name: 生成Release发布信息
+        id: tag
+        if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'
+        run: |
+          BUILD_TIME=$(date +"%Y.%m.%d-%H%M")

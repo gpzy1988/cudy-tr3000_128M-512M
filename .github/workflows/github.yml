@@ -170,7 +170,7 @@ jobs:
             esac
           fi
           cp -f $GITHUB_WORKSPACE/$FIRST_DEV_CONFIG openwrt/.config
-          cd openwrt && make defconfig
+          cd openwrt && make olddefconfig
           CONFIG_HASH=$(md5sum .config | awk '{print $1}')
           echo "hash=$CONFIG_HASH" >> $GITHUB_OUTPUT
       - name: 加载编译缓存加速编译

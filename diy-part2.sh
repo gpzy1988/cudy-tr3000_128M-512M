@@ -58,3 +58,6 @@ TARGET_DEVICES += cudy_tr3000-512mb-v1
 
 # 网络配置支持匹配新设备名
 sed -i '/cudy,tr3000-v1|\\/a cudy,tr3000-512mb-v1|\\' target/linux/mediatek/filogic/base-files/etc/board.d/02_network
+
+rm -rf tmp .config
+make defconfig

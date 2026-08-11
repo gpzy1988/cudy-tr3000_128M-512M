@@ -75,3 +75,5 @@ TARGET_DEVICES += cudy_tr3000-512mb-v1
 ' target/linux/mediatek/image/filogic.mk
 fi
 
+rm -rf tmp .config
+make defconfig

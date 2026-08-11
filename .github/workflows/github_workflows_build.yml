@@ -1,5 +1,5 @@
 
-name: ImmortalWrt DIY Builder
+name: old ImmortalWrt DIY Builder
 
 on:
   repository_dispatch:

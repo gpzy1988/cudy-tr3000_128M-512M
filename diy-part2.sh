@@ -19,49 +19,59 @@
 # Modify hostname
 #sed -i 's/OpenWrt/P3TERX-Router/g' package/base-files/files/bin/config_generate
 
-# 临时解决Rust问题
-sed -i 's/ci-llvm=true/ci-llvm=false/g' feeds/packages/lang/rust/Makefile
-
-# add date in output file name
-sed -i -e '/^IMG_PREFIX:=/i BUILD_DATE := $(shell date +%Y%m%d)' \
-       -e '/^IMG_PREFIX:=/ s/\($(SUBTARGET)\)/\1-$(BUILD_DATE)/' include/image.mk
-
-# set ubi to 122M
-# sed -i 's/reg = <0x5c0000 0x7000000>;/reg = <0x5c0000 0x7a40000>;/' target/linux/mediatek/dts/mt7981b-cudy-tr3000-v1-ubootmod.dts
+# ============================================================
+# kenzo/small 与官方 feeds 冲突处理 (各版本通用, 失败不中断)
+# 说明: kenzo/small 提供最新版插件, 需移除官方 feeds 中的同名旧包
+# ============================================================
+rm -rf feeds/packages/net/{alist,adguardhome,mosdns,xray,v2ray,sing,smartdns} 2>/dev/null
+rm -rf feeds/packages/utils/v2dat 2>/dev/null
+rm -rf feeds/luci/applications/luci-app-mosdns 2>/dev/null
+# 替换为较新的 golang (ssr/passwall 等插件依赖新版 golang 构建)
+rm -rf feeds/packages/lang/golang 2>/dev/null
+git clone --depth 1 https://github.com/sbwml/packages_lang_golang -b 24.x feeds/packages/lang/golang 2>/dev/null || true
 
 # Enable USB power for Cudy TR3000 by default
 sed -i '/modem-power/,/};/{s/gpio-export,output = <1>;/gpio-export,output = <0>;/}' target/linux/mediatek/dts/mt7981b-cudy-tr3000-v1.dtsi
 
-# 
-cp target/linux/mediatek/dts/mt7981b-cudy-tr3000-v1.dts target/linux/mediatek/dts/mt7981b-cudy-tr3000-512mb-v1.dts
-cp target/linux/mediatek/dts/mt7981b-cudy-tr3000-v1.dtsi target/linux/mediatek/dts/mt7981b-cudy-tr3000-512mb-v1.dtsi
+# ============================================================
+# Cudy TR3000 512MB NAND 设备适配
+# ============================================================
+DTS_DIR="target/linux/mediatek/dts"
 
-sed -i 's|reg = <0x5c0000 0x4000000>;|reg = <0x5c0000 0x1FA40000>;|' target/linux/mediatek/dts/mt7981b-cudy-tr3000-512mb-v1.dts
+# 复制 DTS 和 DTSI 文件 (源文件存在时才执行, 兼容不同版本路径)
+if [ -f "$DTS_DIR/mt7981b-cudy-tr3000-v1.dts" ]; then
+  cp "$DTS_DIR/mt7981b-cudy-tr3000-v1.dts" "$DTS_DIR/mt7981b-cudy-tr3000-512mb-v1.dts"
+  cp "$DTS_DIR/mt7981b-cudy-tr3000-v1.dtsi" "$DTS_DIR/mt7981b-cudy-tr3000-512mb-v1.dtsi"
 
-# 
-sed -i -e '/partition@5c0000 {/,/^[ \t]*};/ {
-    s|compatible = "linux,ubi";|reg = <0x5c0000 0x1FA40000>;\n\t\tcompatible = "linux,ubi";|
-}' target/linux/mediatek/dts/mt7981b-cudy-tr3000-512mb-v1.dtsi
+  # 修改 NAND 容量 (512MB = 0x20000000 字节)
+  # 注意：0x5c0000 是前面引导区偏移，0x20000000 - 0x5c0000 = 0x1FA40000 可用空间
+  sed -i 's|reg = <0x5c0000 0x4000000>;|reg = <0x5c0000 0x1FA40000>;|' "$DTS_DIR/mt7981b-cudy-tr3000-512mb-v1.dts"
 
-# 
-grep -q "define Device/cudy_tr3000-512mb-v1" target/linux/mediatek/image/filogic.mk || sed -i '/TARGET_DEVICES += cudy_wbr3000uax-v1-ubootmod/ a \
-define Device/cudy_tr3000-512mb-v1\
-  DEVICE_VENDOR := Cudy\
-  DEVICE_MODEL := TR3000\
-  DEVICE_VARIANT := v1 (512MB NAND)\
-  DEVICE_DTS := mt7981b-cudy-tr3000-512mb-v1\
-  DEVICE_DTS_DIR := ../dts\
-  SUPPORTED_DEVICES += R47-512MB\
-  UBINIZE_OPTS := -E 5\
-  BLOCKSIZE := 128k\
-  PAGESIZE := 2048\
-  IMAGE_SIZE := 507904k\
-  KERNEL_IN_UBI := 1\
-  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata\
-  DEVICE_PACKAGES := kmod-usb3 kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware automount\
-endef\
-TARGET_DEVICES += cudy_tr3000-512mb-v1\
+  # 更新 partition 表中 UBI 分区定义
+  sed -i -e '/partition@5c0000 {/,/^[ \t]*};/ {
+      s|compatible = "linux,ubi";|reg = <0x5c0000 0x1FA40000>;\n\t\tcompatible = "linux,ubi";|
+  }' "$DTS_DIR/mt7981b-cudy-tr3000-512mb-v1.dtsi"
+fi
+
+# 注册新设备定义 (已注册则跳过, 避免重复执行时冲突)
+if ! grep -q "cudy_tr3000-512mb-v1" target/linux/mediatek/image/filogic.mk 2>/dev/null; then
+  sed -i '/TARGET_DEVICES/ a \
+define Device/cudy_tr3000-512mb-v1 \
+  DEVICE_VENDOR := Cudy \
+  DEVICE_MODEL := TR3000 \
+  DEVICE_VARIANT := v1 (512MB NAND) \
+  DEVICE_DTS := mt7981b-cudy-tr3000-512mb-v1 \
+  DEVICE_DTS_DIR := ../dts \
+  SUPPORTED_DEVICES += R47-512MB \
+  UBINIZE_OPTS := -E 5 \
+  BLOCKSIZE := 128k \
+  PAGESIZE := 2048 \
+  IMAGE_SIZE := 507904k \
+  KERNEL_IN_UBI := 1 \
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata \
+  DEVICE_PACKAGES := kmod-usb3 kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware automount \
+endef \
+TARGET_DEVICES += cudy_tr3000-512mb-v1
 ' target/linux/mediatek/image/filogic.mk
+fi
 
-# 网络配置支持匹配新设备名
-#sed -i '/cudy,tr3000-v1|\\/a cudy,tr3000-512mb-v1|\\' target/linux/mediatek/filogic/base-files/etc/board.d/02_network

@@ -1,6 +1,8 @@
 name: 798x-UBOOT
 
 on:
+  repository_dispatch:
+    types: [ "Source Code Update" ]
   workflow_dispatch:
     inputs:
       prerelease:
